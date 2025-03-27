@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dynamics CRM Form Simulator</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f9f9f9;
+    }
+    .crm-header {
+      background-color: #0078d4;
+      color: white;
+      padding: 10px 20px;
+      margin: -20px -20px 20px -20px;
+    }
+    .crm-form {
+      background-color: white;
+      border-radius: 4px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      padding: 20px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .form-section {
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid #eee;
+    }
+    .form-row {
+      display: flex;
+      margin-bottom: 10px;
+      align-items: center;
+    }
+    .form-label {
+      flex: 0 0 150px;
+      font-weight: 500;
+    }
+    .form-field {
+      flex: 1;
+    }
+    input, select, textarea {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      font-family: inherit;
+      box-sizing: border-box;
+    }
+    .required::after {
+      content: "*";
+      color: red;
+      margin-left: 3px;
+    }
+    .form-buttons {
+      text-align: right;
+      margin-top: 20px;
+    }
+    .btn {
+      padding: 8px 15px;
+      border: none;
+      border-radius: 3px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+    .btn-primary {
+      background-color: #0078d4;
+      color: white;
+    }
+    .btn-secondary {
+      background-color: #f0f0f0;
+      color: #333;
+    }
+    .text-danger {
+      color: #d83b01;
+      font-size: 14px;
+      display: none;
+    }
+    .has-error .text-danger {
+      display: block;
+    }
+    .has-error input {
+      border-color: #d83b01;
+    }
+    .status-message {
+      padding: 10px;
+      margin: 10px 0;
+      border-radius: 3px;
+      display: none;
+    }
+    .status-success {
+      background-color: #dff6dd;
+      color: #107c10;
+    }
+    .status-error {
+      background-color: #fde7e9;
+      color: #d83b01;
+    }
+    .extension-panel {
+      background-color: #f0f8ff;
+      border: 1px solid #cce5ff;
+      border-radius: 4px;
+      padding: 15px;
+      margin-top: 20px;
+    }
+    .extension-title {
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    .extension-controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .extension-button {
+      background-color: #0078d4;
+      color: white;
+      border: none;
+      border-radius: 3px;
+      padding: 8px 15px;
+      cursor: pointer;
+    }
+    .extension-button:hover {
+      background-color: #106ebe;
+    }
+  </style>
+</head>
+<body>
+  <div class="crm-header">
+    <h1>Dynamics CRM Simulator</h1>
+  </div>
+
+  <div class="crm-form">
+    <h2>Customer Account</h2>
+    <p>Enter information for the new customer account.</p>
+
+    <div id="statusMessage" class="status-message"></div>
+
+    <div class="form-section">
+      <h3>Account Information</h3>
+      
+      <div class="form-row">
+        <label class="form-label required" for="accountName">Account Name</label>
+        <div class="form-field">
+          <input type="text" id="accountName" name="accountName">
+          <div class="text-danger">Account name is required</div>
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <label class="form-label" for="accountNumber">Account Number</label>
+        <div class="form-field">
+          <input type="text" id="accountNumber" name="accountNumber">
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <label class="form-label" for="industry">Industry</label>
+        <div class="form-field">
+          <select id="industry" name="industry">
+            <option value="">-- Select Industry --</option>
+            <option value="agriculture">Agriculture</option>
+            <option value="financial">Financial Services</option>
+            <option value="healthcare">Healthcare</option>
+            <option value="manufacturing">Manufacturing</option>
+            <option value="retail">Retail</option>
+            <option value="technology">Technology</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <label class="form-label" for="annualRevenue">Annual Revenue</label>
+        <div class="form-field">
+          <input type="number" id="annualRevenue" name="annualRevenue">
+        </div>
+      </div>
+    </div>
+    
+    <div class="form-section">
+      <h3>Contact Information</h3>
+      
+      <div class="form-row">
+        <label class="form-label" for="phoneNumber">Phone Number</label>
+        <div class="form-field">
+          <input type="tel" id="phoneNumber" name="phoneNumber">
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <label class="form-label" for="email">Email</label>
+        <div class="form-field">
+          <input type="email" id="email" name="email">
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <label class="form-label" for="website">Website</label>
+        <div class="form-field">
+          <input type="url" id="website" name="website">
+        </div>
+      </div>
+    </div>
+    
+    <div class="form-section">
+      <h3>Address Information</h3>
+      
+      <div class="form-row">
+        <label class="form-label" for="street">Street</label>
+        <div class="form-field">
+          <input type="text" id="street" name="street">
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <label class="form-label" for="city">City</label>
+        <div class="form-field">
+          <input type="text" id="city" name="city">
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <label class="form-label" for="state">State/Province</label>
+        <div class="form-field">
+          <input type="text" id="state" name="state">
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <label class="form-label" for="postalCode">Postal Code</label>
+        <div class="form-field">
+          <input type="text" id="postalCode" name="postalCode">
+        </div>
+      </div>
+      
+      <div class="form-row">
+        <label class="form-label" for="country">Country</label>
+        <div class="form-field">
+          <input type="text" id="country" name="country">
+        </div>
+      </div>
+    </div>
+    
+    <div class="form-section">
+      <h3>Additional Information</h3>
+      
+      <div class="form-row">
+        <label class="form-label" for="description">Description</label>
+        <div class="form-field">
+          <textarea id="description" name="description" rows="4"></textarea>
+        </div>
+      </div>
+    </div>
+    
+    <div class="form-buttons">
+      <button type="button" class="btn btn-secondary" id="cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="save">Save</button>
+    </div>
+    
+    <!-- Extension Test Panel -->
+    <div class="extension-panel">
+      <div class="extension-title">Browser Extension Test Panel</div>
+      <p>Use these buttons to test the extension's form injection capability:</p>
+      <div class="extension-controls">
+        <button type="button" class="extension-button" id="btnFillName">Fill Account Name</button>
+        <button type="button" class="extension-button" id="btnFillContact">Fill Contact Info</button>
+        <button type="button" class="extension-button" id="btnFillAddress">Fill Address</button>
+        <button type="button" class="extension-button" id="btnFillAll">Fill All Fields</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Simulated Dynamics CRM API -->
+  <script>
+    // Simulate Dynamics CRM Xrm namespace
+    window.Xrm = {
+      Page: {
+        getAttribute: function(fieldName) {
+          const field = document.getElementById(fieldName);
+          if (!field) return null;
+          
+          return {
+            getName: function() {
+              return fieldName;
+            },
+            getAttributeType: function() {
+              if (field.type === 'number') return 'decimal';
+              if (field.type === 'email') return 'email';
+              if (field.type === 'tel') return 'phone';
+              if (field.type === 'select-one') return 'optionset';
+              if (field.tagName === 'TEXTAREA') return 'memo';
+              return 'string';
+            },
+            getValue: function() {
+              return field.value;
+            },
+            setValue: function(value) {
+              field.value = value;
+              // Trigger a change event
+              const event = new Event('change');
+              field.dispatchEvent(event);
+              return true;
+            },
+            getIsDirty: function() {
+              return field.dataset.dirty === 'true';
+            },
+            getRequiredLevel: function() {
+              return field.required || field.classList.contains('required') ? 'required' : 'none';
+            }
+          };
+        },
+        // Get all attributes function
+        getAttribute: function() {
+          const fields = [];
+          const inputs = document.querySelectorAll('input, select, textarea');
+          inputs.forEach(input => {
+            if (input.id) {
+              fields.push(Xrm.Page.getAttribute(input.id));
+            }
+          });
+          return fields;
+        }
+      }
+    };
+
+    // Simulated form saving logic
+    document.getElementById('save').addEventListener('click', function() {
+      const accountName = document.getElementById('accountName').value;
+      const statusMessage = document.getElementById('statusMessage');
+      
+      if (!accountName) {
+        document.getElementById('accountName').parentElement.parentElement.classList.add('has-error');
+        statusMessage.textContent = 'Please fill in all required fields.';
+        statusMessage.className = 'status-message status-error';
+        statusMessage.style.display = 'block';
+        return;
+      }
+      
+      // Simulate saving process
+      statusMessage.textContent = 'Saving account information...';
+      statusMessage.className = 'status-message status-success';
+      statusMessage.style.display = 'block';
+      
+      setTimeout(function() {
+        statusMessage.textContent = 'Account information saved successfully!';
+      }, 1500);
+    });
+
+    // Cancel button logic
+    document.getElementById('cancel').addEventListener('click', function() {
+      if (confirm('Are you sure you want to cancel? Any unsaved changes will be lost.')) {
+        // Clear all fields
+        const inputs = document.querySelectorAll('input, select, textarea');
+        inputs.forEach(input => input.value = '');
+      }
+    });
+
+    // Mark fields as dirty when changed
+    document.querySelectorAll('input, select, textarea').forEach(field => {
+      field.addEventListener('change', () => {
+        field.dataset.dirty = 'true';
+      });
+    });
+
+    // Test buttons for manual testing
+    document.getElementById('btnFillName').addEventListener('click', function() {
+      document.getElementById('accountName').value = 'Contoso Ltd.';
+      document.getElementById('accountNumber').value = 'ACC-2023-001';
+      document.getElementById('industry').value = 'technology';
+      document.getElementById('annualRevenue').value = '2500000';
+    });
+
+    document.getElementById('btnFillContact').addEventListener('click', function() {
+      document.getElementById('phoneNumber').value = '(555) 123-4567';
+      document.getElementById('email').value = 'info@contoso.com';
+      document.getElementById('website').value = 'https://www.contoso.com';
+    });
+
+    document.getElementById('btnFillAddress').addEventListener('click', function() {
+      document.getElementById('street').value = '123 Main Street';
+      document.getElementById('city').value = 'Seattle';
+      document.getElementById('state').value = 'WA';
+      document.getElementById('postalCode').value = '98001';
+      document.getElementById('country').value = 'United States';
+    });
+
+    document.getElementById('btnFillAll').addEventListener('click', function() {
+      document.getElementById('btnFillName').click();
+      document.getElementById('btnFillContact').click();
+      document.getElementById('btnFillAddress').click();
+      document.getElementById('description').value = 'Contoso is a multinational technology corporation specializing in software development and cloud services. This account was created through our enterprise sales channel.';
+    });
+  </script>
+  
+  <!-- Include Extension Test Script -->
+  <script src="test-crm-injection.js"></script>
+</body>
+</html>

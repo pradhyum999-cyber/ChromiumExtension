@@ -14,6 +14,10 @@ import { useExtensionPermissions } from "@/hooks/useExtensionPermissions";
 import { Plus } from "lucide-react";
 
 export default function Home() {
+  // Function to open the CRM test page in a new tab
+  const openCRMTestPage = () => {
+    window.open('/crm-test.html', '_blank');
+  };
   const [activeTab, setActiveTab] = useState("features");
   const { features, toggleFeature } = useExtensionFeatures();
   const { permissions, togglePermission, requestPermission } = useExtensionPermissions();
@@ -120,13 +124,13 @@ export default function Home() {
             
             <PermissionsCard
               icon="http"
-              title="Network Requests"
-              description="Make network requests to specified domains."
+              title="Web Navigation"
+              description="Monitor browser navigation events."
               status="Disabled"
               domains={["api.example.com", "cdn.example.com"]}
-              isEnabled={permissions.network}
-              onToggle={() => togglePermission("network")}
-              onRequest={() => requestPermission("network")}
+              isEnabled={permissions.webNavigation}
+              onToggle={() => togglePermission("webNavigation")}
+              onRequest={() => requestPermission("webNavigation")}
             />
             
             <div className="text-xs text-neutral-dark bg-neutral-light p-3 rounded mt-4">
@@ -140,6 +144,27 @@ export default function Home() {
         
         {/* Logs Tab */}
         {activeTab === "logs" && <LogsTab />}
+        
+        {/* CRM Testing UI */}
+        {activeTab === "features" && (
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+            <h3 className="text-sm font-semibold text-blue-700 mb-1">Dynamics CRM Integration</h3>
+            <p className="text-xs text-gray-600 mb-2">
+              Test the extension's ability to inject data into Dynamics CRM forms.
+            </p>
+            <button
+              onClick={openCRMTestPage}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 px-3 rounded text-sm flex items-center justify-center"
+            >
+              <span className="mr-1">Open CRM Test Page</span>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"></path>
+                <path d="M15 3h6v6"></path>
+                <path d="M10 14L21 3"></path>
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
       
       <Footer />
