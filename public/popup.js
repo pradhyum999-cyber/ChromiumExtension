@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const fillContactButton = document.getElementById('fill-contact');
   const statusElement = document.getElementById('status');
   
-  // Template data for different business types
+  // Template data for different entity types
   const templates = {
     business: {
       name: "Contoso Ltd",
@@ -34,6 +34,23 @@ document.addEventListener('DOMContentLoaded', function() {
       revenue: 12500000,
       numberofemployees: 1250,
       description: "Northwind Healthcare is a comprehensive healthcare provider serving the Pacific Northwest."
+    },
+    contact: {
+      // Core contact fields
+      firstname: "John",
+      lastname: "Doe",
+      fullname: "John Doe",
+      jobtitle: "Sales Manager",
+      emailaddress1: "john.doe@example.com",
+      telephone1: "555-123-4567",
+      mobilephone: "555-987-6543",
+      address1_line1: "123 Main Street",
+      address1_city: "Seattle",
+      address1_stateorprovince: "WA",
+      address1_postalcode: "98101",
+      address1_country: "United States",
+      birthdate: new Date(1980, 5, 15).toISOString(),
+      description: "Contact created via CRM Data Extension"
     }
   };
   

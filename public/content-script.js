@@ -96,27 +96,127 @@ const dynamicsCRM = {
   getFormFields() {
     try {
       const formContext = this.getFormContext();
-      if (!formContext || !formContext.getAttribute) {
+      if (!formContext) {
+        logToExtension("ERROR", "Could not get form context");
         return [];
       }
       
-      const attributes = formContext.getAttribute();
-      if (!attributes || !attributes.forEach) {
-        return [];
+      // Modern Unified Interface
+      if (typeof formContext.getAttribute === 'function') {
+        try {
+          // Get attributes using modern API
+          const attributes = formContext.getAttribute();
+          if (!attributes || !attributes.forEach) {
+            logToExtension("WARNING", "No attributes found on form or attributes not iterable");
+            return [];
+          }
+          
+          const fields = [];
+          attributes.forEach(attribute => {
+            try {
+              fields.push({
+                name: attribute.getName(),
+                type: attribute.getAttributeType(),
+                value: attribute.getValue(),
+                isDirty: attribute.getIsDirty(),
+                isRequired: attribute.getRequiredLevel() === 'required'
+              });
+            } catch (attributeError) {
+              logToExtension("WARNING", `Error processing attribute: ${attributeError.message}`);
+            }
+          });
+          
+          return fields;
+        } catch (e) {
+          logToExtension("ERROR", `Error getting attributes from form context: ${e.message}`);
+        }
       }
       
-      const fields = [];
-      attributes.forEach(attribute => {
-        fields.push({
-          name: attribute.getName(),
-          type: attribute.getAttributeType(),
-          value: attribute.getValue(),
-          isDirty: attribute.getIsDirty(),
-          isRequired: attribute.getRequiredLevel() === 'required'
-        });
-      });
+      // Try alternative approaches for different versions of Dynamics CRM
+      if (typeof formContext.data !== 'undefined' && 
+          typeof formContext.data.entity !== 'undefined' && 
+          typeof formContext.data.entity.attributes !== 'undefined') {
+        
+        try {
+          const attributes = formContext.data.entity.attributes;
+          const fields = [];
+          
+          // Handle collection object with get method
+          if (typeof attributes.get === 'function') {
+            // Try to get all controls to determine available attributes
+            const controls = formContext.ui ? formContext.ui.controls : null;
+            if (controls && typeof controls.forEach === 'function') {
+              controls.forEach(control => {
+                try {
+                  if (control.getAttribute) {
+                    const attribute = control.getAttribute();
+                    if (attribute) {
+                      fields.push({
+                        name: attribute.getName(),
+                        type: attribute.getAttributeType ? attribute.getAttributeType() : 'unknown',
+                        value: attribute.getValue ? attribute.getValue() : null,
+                        isDirty: attribute.getIsDirty ? attribute.getIsDirty() : false,
+                        isRequired: attribute.getRequiredLevel ? attribute.getRequiredLevel() === 'required' : false
+                      });
+                    }
+                  }
+                } catch (controlError) {
+                  logToExtension("WARNING", `Error accessing control attribute: ${controlError.message}`);
+                }
+              });
+            }
+          }
+          // Handle forEach or each method directly on attributes
+          else if (typeof attributes.forEach === 'function') {
+            attributes.forEach(attribute => {
+              try {
+                fields.push({
+                  name: attribute.getName(),
+                  type: attribute.getAttributeType ? attribute.getAttributeType() : 'unknown',
+                  value: attribute.getValue ? attribute.getValue() : null,
+                  isDirty: attribute.getIsDirty ? attribute.getIsDirty() : false,
+                  isRequired: attribute.getRequiredLevel ? attribute.getRequiredLevel() === 'required' : false
+                });
+              } catch (attrError) {
+                logToExtension("WARNING", `Error processing attribute in collection: ${attrError.message}`);
+              }
+            });
+          }
+          
+          return fields;
+        } catch (e) {
+          logToExtension("ERROR", `Error accessing entity attributes: ${e.message}`);
+        }
+      }
       
-      return fields;
+      // Last resort - try to get visible controls
+      if (formContext.ui && formContext.ui.controls && typeof formContext.ui.controls.forEach === 'function') {
+        try {
+          const fields = [];
+          formContext.ui.controls.forEach(control => {
+            try {
+              if (control.getName) {
+                fields.push({
+                  name: control.getName(),
+                  type: 'unknown',
+                  value: null,
+                  isDirty: false,
+                  isRequired: false
+                });
+              }
+            } catch (controlError) {
+              // Ignore errors for individual controls
+            }
+          });
+          
+          return fields;
+        } catch (e) {
+          logToExtension("ERROR", `Error accessing UI controls: ${e.message}`);
+        }
+      }
+      
+      logToExtension("ERROR", "Could not retrieve form fields using any available method");
+      return [];
     } catch (e) {
       logToExtension("ERROR", `Error getting Dynamics CRM form fields: ${e.message}`);
       return [];
@@ -127,20 +227,130 @@ const dynamicsCRM = {
   setFieldValue(fieldName, value) {
     try {
       const formContext = this.getFormContext();
-      if (!formContext || !formContext.getAttribute) {
+      if (!formContext) {
         logToExtension("ERROR", "Form context not available");
         return false;
       }
       
-      const attribute = formContext.getAttribute(fieldName);
+      // Try multiple approaches to get the attribute
+      let attribute = null;
+      
+      // Method 1: Direct getAttribute method
+      if (typeof formContext.getAttribute === 'function') {
+        try {
+          attribute = formContext.getAttribute(fieldName);
+        } catch (e) {
+          logToExtension("DEBUG", `Could not get attribute using getAttribute: ${e.message}`);
+        }
+      }
+      
+      // Method 2: Modern Unified Interface
+      if (!attribute && typeof formContext.data !== 'undefined' && 
+          typeof formContext.data.entity !== 'undefined' && 
+          typeof formContext.data.entity.attributes !== 'undefined' && 
+          typeof formContext.data.entity.attributes.get === 'function') {
+        try {
+          attribute = formContext.data.entity.attributes.get(fieldName);
+        } catch (e) {
+          logToExtension("DEBUG", `Could not get attribute using entity.attributes.get: ${e.message}`);
+        }
+      }
+      
+      // Method 3: Get control first, then attribute (for some CRM versions)
+      if (!attribute && formContext.ui && formContext.ui.controls && 
+          typeof formContext.ui.controls.get === 'function') {
+        try {
+          const control = formContext.ui.controls.get(fieldName);
+          if (control && typeof control.getAttribute === 'function') {
+            attribute = control.getAttribute();
+          }
+        } catch (e) {
+          logToExtension("DEBUG", `Could not get attribute from control: ${e.message}`);
+        }
+      }
+      
       if (!attribute) {
-        logToExtension("ERROR", `Field '${fieldName}' not found on form`);
+        logToExtension("ERROR", `Field '${fieldName}' not found on form using any method`);
         return false;
       }
       
-      attribute.setValue(value);
-      logToExtension("INFO", `Set field '${fieldName}' to value: ${value}`);
-      return true;
+      // Handle the attribute based on its type
+      try {
+        // Get attribute type if available
+        let attributeType = 'unknown';
+        try {
+          if (typeof attribute.getAttributeType === 'function') {
+            attributeType = attribute.getAttributeType();
+          }
+        } catch (typeError) {
+          // If we can't get the type, we'll try a generic approach
+        }
+        
+        logToExtension("INFO", `Setting field '${fieldName}' of type '${attributeType}' to value: ${JSON.stringify(value)}`);
+        
+        // Handle special cases based on attribute type
+        if (attributeType === 'datetime' && typeof value === 'string') {
+          // Convert string dates to Date objects
+          try {
+            const dateValue = new Date(value);
+            if (!isNaN(dateValue.getTime())) {
+              attribute.setValue(dateValue);
+            } else {
+              attribute.setValue(value); // Fall back to original value
+            }
+          } catch (dateError) {
+            attribute.setValue(value); // Fall back to original value
+          }
+        } 
+        // Handle picklist/optionset values
+        else if (attributeType === 'picklist' || attributeType === 'optionset') {
+          // If value is a number, set directly
+          if (typeof value === 'number') {
+            attribute.setValue(value);
+          } 
+          // If it's a string that could be a number, convert it
+          else if (typeof value === 'string' && !isNaN(Number(value))) {
+            attribute.setValue(Number(value));
+          }
+          // Otherwise try to find the option that matches the string
+          else if (typeof value === 'string' && typeof attribute.getOptions === 'function') {
+            const options = attribute.getOptions();
+            let found = false;
+            
+            if (options) {
+              options.forEach(option => {
+                if (option.text && option.text.toLowerCase() === value.toLowerCase()) {
+                  attribute.setValue(option.value);
+                  found = true;
+                }
+              });
+            }
+            
+            if (!found) {
+              logToExtension("WARNING", `Could not find option matching '${value}' for field '${fieldName}'`);
+              return false;
+            }
+          } else {
+            // Default fallback
+            attribute.setValue(value);
+          }
+        }
+        // Handle boolean values
+        else if (attributeType === 'boolean' && typeof value === 'string') {
+          const boolValue = value.toLowerCase() === 'true' || value === '1';
+          attribute.setValue(boolValue);
+        }
+        // Handle all other cases with generic setValue
+        else {
+          attribute.setValue(value);
+        }
+        
+        logToExtension("INFO", `Successfully set field '${fieldName}' to value: ${JSON.stringify(value)}`);
+        return true;
+      } catch (valueError) {
+        logToExtension("ERROR", `Error setting value for '${fieldName}': ${valueError.message}`);
+        return false;
+      }
     } catch (e) {
       logToExtension("ERROR", `Error setting field '${fieldName}': ${e.message}`);
       return false;
@@ -318,9 +528,23 @@ async function initContentScript() {
         // If contact only, just include contact-related fields
         if (message.contactOnly) {
           const contactFields = [
-            'telephone1', 'emailaddress1', 'websiteurl', 
-            'address1_line1', 'address1_city', 'address1_stateorprovince',
-            'address1_postalcode'
+            // Personal information
+            'firstname', 'lastname', 'fullname', 'jobtitle', 'parentcustomerid',
+            'telephone1', 'telephone2', 'mobilephone', 'emailaddress1', 'emailaddress2',
+            'websiteurl', 'fax',
+            
+            // Address information
+            'address1_line1', 'address1_line2', 'address1_line3',
+            'address1_city', 'address1_stateorprovince', 'address1_postalcode',
+            'address1_country', 'address1_telephone1',
+            
+            // Secondary address
+            'address2_line1', 'address2_line2', 'address2_city',
+            'address2_stateorprovince', 'address2_postalcode', 'address2_country',
+            
+            // Additional info
+            'birthdate', 'anniversary', 'spousesname', 'familystatuscode',
+            'department', 'description', 'preferredcontactmethodcode'
           ];
           
           fieldsToFill = Object.keys(templateData)
