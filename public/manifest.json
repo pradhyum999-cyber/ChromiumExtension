@@ -32,7 +32,11 @@
         "*://*.github.com/*",
         "*://*.dynamics.com/*",
         "*://*.crm.dynamics.com/*",
-        "*://*.crm*.dynamics.com/*"
+        "*://*.crm1.dynamics.com/*",
+        "*://*.crm2.dynamics.com/*",
+        "*://*.crm3.dynamics.com/*",
+        "*://*.crm4.dynamics.com/*",
+        "*://*.crm11.dynamics.com/*"
       ],
       "js": ["content-script.js"],
       "run_at": "document_idle",
@@ -58,7 +62,11 @@
     "*://*.github.com/*",
     "*://*.dynamics.com/*",
     "*://*.crm.dynamics.com/*",
-    "*://*.crm*.dynamics.com/*"
+    "*://*.crm1.dynamics.com/*",
+    "*://*.crm2.dynamics.com/*",
+    "*://*.crm3.dynamics.com/*",
+    "*://*.crm4.dynamics.com/*",
+    "*://*.crm11.dynamics.com/*"
   ],
   "web_accessible_resources": [
     {
@@ -71,7 +79,11 @@
         "*://*.github.com/*",
         "*://*.dynamics.com/*",
         "*://*.crm.dynamics.com/*",
-        "*://*.crm*.dynamics.com/*"
+        "*://*.crm1.dynamics.com/*",
+        "*://*.crm2.dynamics.com/*",
+        "*://*.crm3.dynamics.com/*",
+        "*://*.crm4.dynamics.com/*",
+        "*://*.crm11.dynamics.com/*"
       ]
     }
   ],
