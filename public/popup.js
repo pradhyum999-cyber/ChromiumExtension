@@ -4,7 +4,7 @@
 document.addEventListener('DOMContentLoaded', async function() {
   // Load React build into popup
   const reactAppScript = document.createElement('script');
-  reactAppScript.src = 'public/index.js';
+  reactAppScript.src = 'index.js';
   document.body.appendChild(reactAppScript);
 
   // Setup message passing to background script

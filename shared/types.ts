@@ -22,7 +22,7 @@ export interface BrowserFeatures {
 }
 
 // Permission types
-export type ExtensionPermission = 'storage' | 'tabs' | 'cookies' | 'network';
+export type ExtensionPermission = 'storage' | 'tabs' | 'cookies' | 'webNavigation' | 'scripting' | 'bookmarks' | 'notifications';
 
 // Log types
 export interface LogEntry {

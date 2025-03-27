@@ -42,22 +42,98 @@ export const browserAPI = {
   // Permissions API abstraction
   permissions: {
     request: async (permission: string): Promise<boolean> => {
-      // In a real extension, this would use browser.permissions.request
       console.log(`Requesting permission: ${permission}`);
-      return new Promise(resolve => {
-        setTimeout(() => resolve(true), 500);
-      });
+      
+      // Check if we're in an extension environment
+      if (typeof chrome !== 'undefined' && chrome.runtime) {
+        return new Promise((resolve) => {
+          chrome.runtime.sendMessage(
+            { action: "requestPermission", permission },
+            (response) => {
+              console.log("Request permission response:", response);
+              if (response && response.success) {
+                resolve(true);
+              } else {
+                console.error("Permission request failed:", response?.message || "User denied permission");
+                resolve(false);
+              }
+            }
+          );
+        });
+      } else {
+        // Fallback for development environment
+        return new Promise(resolve => {
+          setTimeout(() => resolve(true), 500);
+        });
+      }
     },
     
     check: async (permission: string): Promise<boolean> => {
-      // In a real extension, this would use browser.permissions.contains
-      const permissions = await browserAPI.storage.get<Record<string, boolean>>("permissions");
-      return permissions?.[permission] || false;
+      // In extension environment, check with real permissions API
+      if (typeof chrome !== 'undefined' && chrome.permissions) {
+        return new Promise((resolve) => {
+          chrome.permissions.contains(
+            { permissions: [permission] },
+            (result) => {
+              resolve(result);
+            }
+          );
+        });
+      } else {
+        // Fallback for development environment
+        const permissions = await browserAPI.storage.get<Record<string, boolean>>("permissions");
+        return permissions?.[permission] || false;
+      }
     },
     
     getAll: async (): Promise<Record<string, boolean>> => {
-      // In a real extension, this would use browser.permissions.getAll
-      return await browserAPI.storage.get<Record<string, boolean>>("permissions") || {};
+      // In extension environment, use real permissions API
+      if (typeof chrome !== 'undefined' && chrome.runtime) {
+        return new Promise((resolve) => {
+          chrome.runtime.sendMessage(
+            { action: "getPermissions" },
+            (response) => {
+              if (response) {
+                resolve(response);
+              } else {
+                // Fallback to local storage if messaging fails
+                browserAPI.storage.get<Record<string, boolean>>("permissions")
+                  .then(perms => resolve(perms || {}));
+              }
+            }
+          );
+        });
+      } else {
+        // Fallback for development environment
+        return await browserAPI.storage.get<Record<string, boolean>>("permissions") || {};
+      }
+    },
+    
+    toggle: async (permission: string): Promise<boolean> => {
+      console.log(`Toggling permission: ${permission}`);
+      
+      // In extension environment, use messaging API
+      if (typeof chrome !== 'undefined' && chrome.runtime) {
+        return new Promise((resolve) => {
+          chrome.runtime.sendMessage(
+            { action: "togglePermission", permission },
+            (response) => {
+              console.log("Toggle permission response:", response);
+              if (response && response.success) {
+                resolve(true);
+              } else {
+                console.error("Permission toggle failed:", response?.message || "Unknown error");
+                resolve(false);
+              }
+            }
+          );
+        });
+      } else {
+        // Fallback for development environment
+        const permissions = await browserAPI.storage.get<Record<string, boolean>>("permissions") || {};
+        permissions[permission] = !permissions[permission];
+        return await browserAPI.storage.set("permissions", permissions);
+      }
     }
   },
   
@@ -134,6 +210,104 @@ export const browserAPI = {
     clear: async (): Promise<boolean> => {
       return await browserAPI.storage.set("logs", []);
     }
+  },
+  
+  // Notifications API abstraction
+  notifications: {
+    create: async (title: string, message: string, type: 'basic' | 'image' | 'list' | 'progress' = 'basic'): Promise<boolean> => {
+      console.log(`Showing notification: ${title} - ${message}`);
+      
+      // If in extension environment
+      if (typeof chrome !== 'undefined' && chrome.notifications) {
+        return new Promise((resolve) => {
+          chrome.notifications.create({
+            type,
+            iconUrl: 'icons/icon48.png',
+            title,
+            message,
+            priority: 1
+          }, (notificationId) => {
+            if (chrome.runtime.lastError) {
+              console.error("Error showing notification:", chrome.runtime.lastError);
+              resolve(false);
+            } else {
+              // Log notification
+              browserAPI.logs.add("INFO", `Notification shown: ${title}`);
+              resolve(true);
+            }
+          });
+        });
+      } else {
+        // Fallback for development environment
+        console.log(`Notification (mock): ${title} - ${message}`);
+        
+        // Show a browser notification if supported
+        if ("Notification" in window) {
+          try {
+            Notification.requestPermission().then(permission => {
+              if (permission === "granted") {
+                new Notification(title, { body: message });
+              }
+            });
+          } catch (error) {
+            console.error("Error showing browser notification:", error);
+          }
+        }
+        
+        await browserAPI.logs.add("INFO", `Notification shown (mock): ${title}`);
+        return true;
+      }
+    },
+    
+    clear: async (notificationId?: string): Promise<boolean> => {
+      if (typeof chrome !== 'undefined' && chrome.notifications) {
+        return new Promise((resolve) => {
+          if (notificationId) {
+            chrome.notifications.clear(notificationId, (wasCleared) => {
+              resolve(wasCleared);
+            });
+          } else {
+            // No ID provided, we can't clear all notifications with the API
+            resolve(false);
+          }
+        });
+      } else {
+        // Nothing to do in development environment
+        return true;
+      }
+    }
+  }
+};
+
+// Function to execute a script in the active tab
+export const executeScript = async (scriptFunction?: () => any): Promise<any> => {
+  console.log('Executing script in active tab');
+  
+  // Check if we're in extension environment
+  if (typeof chrome !== 'undefined' && chrome.runtime) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        { action: "executeScript", scriptFunction },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+          } else if (response && response.success) {
+            resolve(response.result);
+          } else {
+            reject(response?.error || 'Unknown error executing script');
+          }
+        }
+      );
+    });
+  } else {
+    // Fallback for development environment
+    console.log('Not in extension environment, mocking script execution');
+    return {
+      title: 'Mock Page Title',
+      url: 'https://example.com',
+      success: true,
+      message: 'Script execution simulated in development environment'
+    };
   }
 };
 
@@ -165,7 +339,10 @@ export const initializeExtensionData = async () => {
       storage: true,
       tabs: true,
       cookies: false,
-      network: false
+      webNavigation: false,
+      scripting: false,
+      bookmarks: false,
+      notifications: false
     };
     await browserAPI.storage.set("permissions", defaultPermissions);
   }

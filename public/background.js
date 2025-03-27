@@ -22,7 +22,10 @@ let extensionState = {
     storage: true,
     tabs: true,
     cookies: false,
-    network: false
+    webNavigation: false,
+    scripting: false,
+    bookmarks: false,
+    notifications: false
   },
   performanceMetrics: {
     cpuUsage: "3.2%",
@@ -143,6 +146,11 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // Message handling from popup or content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Log message received (except for high-frequency messages)
+  if (message.action !== "getLogs" && message.action !== "getFeatures" && message.action !== "getPermissions") {
+    console.log("Message received:", message.action, message);
+  }
+  
   switch (message.action) {
     case "getFeatures":
       chrome.storage.local.get(['features'], (result) => {
@@ -164,8 +172,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       
     case "requestPermission":
       logEvent("INFO", `Permission request: ${message.permission}`);
-      // In a real extension, this would use the permissions API
-      sendResponse({ success: true });
+      
+      // Handle permission request using the permissions API
+      try {
+        if (message.permission === 'storage') {
+          // Storage is already granted as a required permission
+          sendResponse({ success: true, alreadyGranted: true });
+        } else {
+          // Request the permission from the user
+          chrome.permissions.request(
+            { 
+              permissions: [message.permission] 
+            },
+            (granted) => {
+              if (granted) {
+                logEvent("INFO", `Permission granted: ${message.permission}`);
+                
+                // Update permission status in storage
+                chrome.storage.local.get(['permissions'], (result) => {
+                  const permissions = result.permissions || extensionState.permissions;
+                  permissions[message.permission] = true;
+                  chrome.storage.local.set({ permissions });
+                });
+                
+                sendResponse({ success: true, granted: true });
+              } else {
+                logEvent("WARNING", `Permission denied: ${message.permission}`);
+                sendResponse({ success: false, granted: false });
+              }
+            }
+          );
+        }
+      } catch (error) {
+        logEvent("ERROR", `Error requesting permission ${message.permission}: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      }
       break;
       
     case "getLogs":
@@ -185,11 +226,259 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: true });
       });
       break;
+      
+    case "getPageMetrics":
+      // Forward the request to the active tab's content script
+      try {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs.length === 0) {
+            sendResponse({ success: false, error: "No active tab found" });
+            return;
+          }
+          
+          const activeTab = tabs[0];
+          
+          // Send message to content script
+          chrome.tabs.sendMessage(activeTab.id, { action: "getPageMetrics" }, (response) => {
+            if (chrome.runtime.lastError) {
+              // Content script might not be injected
+              logEvent("WARNING", `Failed to get page metrics: ${chrome.runtime.lastError.message}`);
+              sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              logEvent("INFO", `Retrieved page metrics from tab ${activeTab.id}`);
+              sendResponse({ success: true, metrics: response });
+            }
+          });
+        });
+      } catch (error) {
+        logEvent("ERROR", `Error getting page metrics: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      }
+      break;
+      
+    case "executeScript":
+      try {
+        // Check if we have scripting permission
+        chrome.permissions.contains({ permissions: ['scripting'] }, (hasPermission) => {
+          if (!hasPermission) {
+            logEvent("WARNING", "Cannot execute script: scripting permission not granted");
+            sendResponse({ success: false, error: "Scripting permission not granted" });
+            return;
+          }
+          
+          // Execute script in active tab
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs.length === 0) {
+              sendResponse({ success: false, error: "No active tab found" });
+              return;
+            }
+            
+            const tabId = tabs[0].id;
+            
+            // Execute the script
+            chrome.scripting.executeScript({
+              target: { tabId: tabId },
+              function: message.scriptFunction || (() => {
+                // Default script function
+                console.log('Default script executed by extension');
+                return { success: true, message: "Script executed" };
+              })
+            }, (results) => {
+              if (chrome.runtime.lastError) {
+                logEvent("ERROR", `Script execution failed: ${chrome.runtime.lastError.message}`);
+                sendResponse({ success: false, error: chrome.runtime.lastError.message });
+              } else if (results && results[0]) {
+                logEvent("INFO", `Script executed in tab ${tabId}`);
+                sendResponse({ success: true, result: results[0].result });
+              } else {
+                sendResponse({ success: false, error: "Unknown error executing script" });
+              }
+            });
+          });
+        });
+      } catch (error) {
+        logEvent("ERROR", `Error executing script: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      }
+      break;
+      
+    case "togglePermission":
+      const permissionName = message.permission;
+      
+      if (permissionName === 'storage') {
+        // Storage is required and cannot be toggled
+        sendResponse({ success: false, message: "Cannot toggle required permission" });
+        return true;
+      }
+      
+      try {
+        // Check current status
+        chrome.storage.local.get(['permissions'], (result) => {
+          const permissions = result.permissions || extensionState.permissions;
+          const currentStatus = permissions[permissionName];
+          
+          if (currentStatus) {
+            // Permission is on, try to remove it
+            chrome.permissions.remove({
+              permissions: [permissionName]
+            }, (removed) => {
+              if (removed) {
+                // Update the stored status
+                permissions[permissionName] = false;
+                chrome.storage.local.set({ permissions });
+                logEvent("INFO", `Permission removed: ${permissionName}`);
+                sendResponse({ success: true, status: false });
+              } else {
+                logEvent("WARNING", `Failed to remove permission: ${permissionName}`);
+                sendResponse({ success: false, message: "Failed to remove permission" });
+              }
+            });
+          } else {
+            // Permission is off, request it
+            chrome.permissions.request({
+              permissions: [permissionName]
+            }, (granted) => {
+              if (granted) {
+                // Update the stored status
+                permissions[permissionName] = true;
+                chrome.storage.local.set({ permissions });
+                logEvent("INFO", `Permission granted: ${permissionName}`);
+                sendResponse({ success: true, status: true });
+              } else {
+                logEvent("WARNING", `Permission request denied: ${permissionName}`);
+                sendResponse({ success: false, message: "Permission request denied" });
+              }
+            });
+          }
+        });
+      } catch (error) {
+        logEvent("ERROR", `Error toggling permission ${permissionName}: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      }
+      break;
   }
   
   // Required for async sendResponse
   return true;
 });
+
+// Additional event listeners for optional permissions
+
+// Tab events (if tabs permission is granted)
+try {
+  chrome.tabs.onCreated.addListener((tab) => {
+    logEvent("INFO", `New tab created: ${tab.id}`);
+  });
+  
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.status === 'complete') {
+      logEvent("INFO", `Tab ${tabId} loaded: ${tab.url.substring(0, 50)}...`);
+    }
+  });
+} catch (e) {
+  // Tabs permission not granted
+  console.log("Tabs permission not granted:", e);
+}
+
+// Web navigation events (if webNavigation permission is granted)
+try {
+  chrome.webNavigation.onCompleted.addListener((details) => {
+    logEvent("INFO", `Navigation completed in tab ${details.tabId}`);
+  });
+} catch (e) {
+  // WebNavigation permission not granted
+  console.log("WebNavigation permission not granted:", e);
+}
+
+// Notification event handlers (if notifications permission is granted)
+try {
+  chrome.notifications.onClicked.addListener((notificationId) => {
+    logEvent("INFO", `Notification clicked: ${notificationId}`);
+  });
+} catch (e) {
+  // Notifications permission not granted
+  console.log("Notifications permission not granted:", e);
+}
+
+// Bookmarks event handlers (if bookmarks permission is granted)
+try {
+  chrome.bookmarks.onCreated.addListener((id, bookmark) => {
+    logEvent("INFO", `Bookmark created: ${bookmark.title}`);
+  });
+} catch (e) {
+  // Bookmarks permission not granted
+  console.log("Bookmarks permission not granted:", e);
+}
+
+// Scripting permission handlers (if scripting permission is granted)
+try {
+  // Function to execute script in active tab
+  const executeScript = () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs.length > 0) {
+        const tabId = tabs[0].id;
+        try {
+          // Execute a script in the active tab
+          chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            function: () => {
+              // This runs in the context of the tab
+              console.log('Script executed by extension in page context!');
+              
+              // Change page background color slightly to indicate script execution
+              // This is just a visual demonstration that can be removed
+              const originalColor = document.body.style.backgroundColor;
+              document.body.style.backgroundColor = '#f8f9fa';
+              
+              // Restore original color after 1 second
+              setTimeout(() => {
+                document.body.style.backgroundColor = originalColor;
+              }, 1000);
+              
+              return {
+                title: document.title,
+                url: window.location.href,
+                timestamp: new Date().toISOString()
+              };
+            }
+          }, (results) => {
+            if (chrome.runtime.lastError) {
+              logEvent("ERROR", `Script execution failed: ${chrome.runtime.lastError.message}`);
+            } else if (results && results[0]) {
+              logEvent("INFO", `Script executed in tab ${tabId}: ${results[0].result.title}`);
+              
+              // Show a notification if notifications permission is granted
+              try {
+                chrome.notifications.create({
+                  type: 'basic',
+                  iconUrl: 'icons/icon48.png',
+                  title: 'Script Executed',
+                  message: `Script successfully ran in: ${results[0].result.title}`,
+                  priority: 1
+                });
+              } catch (notificationError) {
+                console.log("Notification could not be shown:", notificationError);
+              }
+            }
+          });
+        } catch (error) {
+          logEvent("ERROR", `Failed to execute script: ${error.message}`);
+        }
+      }
+    });
+  };
+  
+  // Add a command listener for keyboard shortcut (if defined in manifest)
+  chrome.commands.onCommand.addListener((command) => {
+    if (command === "execute-script") {
+      executeScript();
+    }
+  });
+  
+} catch (e) {
+  // Scripting permission not granted
+  console.log("Scripting permission not granted:", e);
+}
 
 // Initialize when service worker starts
 initializeExtensionData();
