@@ -52,14 +52,32 @@ window.CrmDataInjector = {
       if (isCRMBasedOnScripts) {
         CrmDataInjector.log('INFO', 'CRM script sources found in page, higher confidence that this is CRM');
       }
-      
-      // First try the global Xrm
+
+      // First try the Unified Interface direct form approach through Xrm.Form.formContext (newest API)
       if (typeof Xrm !== 'undefined') {
-        CrmDataInjector.log('INFO', 'Global Xrm object found');
+        CrmDataInjector.log('INFO', 'Global Xrm object found, checking Form APIs');
         
-        // Current form in Unified Interface
+        // Try Unified Interface form selector method
+        if (Xrm.Form && Xrm.Form.formContext) {
+          CrmDataInjector.log('INFO', 'Using Xrm.Form.formContext (Unified Interface)');
+          return Xrm.Form.formContext;
+        }
+        
+        // Try various get form methods available in Unified Interface
+        if (Xrm.Form && typeof Xrm.Form.getFormContext === 'function') {
+          CrmDataInjector.log('INFO', 'Using Xrm.Form.getFormContext()');
+          return Xrm.Form.getFormContext();
+        }
+        
+        // Try direct form object (present in some versions)
+        if (Xrm.Form && Xrm.Form.data && Xrm.Form.data.entity) {
+          CrmDataInjector.log('INFO', 'Using Xrm.Form directly');
+          return Xrm.Form;
+        }
+        
+        // Fall back to the classic interface approach through Xrm.Page
         if (Xrm.Page && Xrm.Page.data && Xrm.Page.data.entity) {
-          CrmDataInjector.log('INFO', 'Using Xrm.Page form context');
+          CrmDataInjector.log('INFO', 'Using Xrm.Page form context (Classic Interface)');
           return Xrm.Page;
         }
         
@@ -69,16 +87,68 @@ window.CrmDataInjector = {
           return Xrm.Page.ui.formContext;
         }
         
-        // Try Unified Interface method
-        if (Xrm.Page && Xrm.Page.getFormContext) {
+        // Try Unified Interface method on Page
+        if (Xrm.Page && typeof Xrm.Page.getFormContext === 'function') {
           CrmDataInjector.log('INFO', 'Using Xrm.Page.getFormContext');
-          return Xrm.Page.getFormContext();
+          try {
+            const formCtx = Xrm.Page.getFormContext();
+            if (formCtx) {
+              return formCtx;
+            }
+          } catch (fErr) {
+            CrmDataInjector.log('WARNING', 'Error in Xrm.Page.getFormContext: ' + fErr.message);
+          }
         }
         
-        // Try App for Outlook context
-        if (Xrm.App && Xrm.App.findFormContext) {
-          CrmDataInjector.log('INFO', 'Using Xrm.App.findFormContext');
-          return Xrm.App.findFormContext();
+        // Try App for Outlook context or v9+ context
+        if (Xrm.App) {
+          CrmDataInjector.log('INFO', 'Xrm.App found, trying App APIs');
+          
+          // Version 9.0+ method
+          if (typeof Xrm.App.findFormContext === 'function') {
+            try {
+              CrmDataInjector.log('INFO', 'Using Xrm.App.findFormContext');
+              const formCtx = Xrm.App.findFormContext();
+              if (formCtx) return formCtx;
+            } catch (appErr) {
+              CrmDataInjector.log('WARNING', 'Error in Xrm.App.findFormContext: ' + appErr.message);
+            }
+          }
+          
+          // More recent API patterns
+          if (typeof Xrm.App.getFormContext === 'function') {
+            try {
+              CrmDataInjector.log('INFO', 'Using Xrm.App.getFormContext');
+              const formCtx = Xrm.App.getFormContext();
+              if (formCtx) return formCtx;
+            } catch (appErr) {
+              CrmDataInjector.log('WARNING', 'Error in Xrm.App.getFormContext: ' + appErr.message);
+            }
+          }
+        }
+        
+        // Special handling for Unified Interface - create a synthetic form context
+        // This addresses cases where hasForm = false but we still have entity data
+        if (Xrm && Xrm.Page && Xrm.Page.data && Xrm.Page.data.entity) {
+          try {
+            CrmDataInjector.log('INFO', 'Creating synthetic form context from Xrm.Page.data');
+            
+            // Create minimal formContext for attribute operations
+            var syntheticFormContext = {
+              data: Xrm.Page.data,
+              ui: Xrm.Page.ui,
+              getAttribute: function(name) {
+                return Xrm.Page.getAttribute(name);
+              },
+              getControl: function(name) {
+                return Xrm.Page.getControl(name);
+              }
+            };
+            
+            return syntheticFormContext;
+          } catch (synthErr) {
+            CrmDataInjector.log('WARNING', 'Error creating synthetic form context: ' + synthErr.message);
+          }
         }
       }
       
@@ -87,6 +157,13 @@ window.CrmDataInjector = {
         CrmDataInjector.log('INFO', 'Found Xrm in parent frame');
         var parentXrm = window.parent.Xrm;
         
+        // Check for V9+ Form
+        if (parentXrm.Form && parentXrm.Form.formContext) {
+          CrmDataInjector.log('INFO', 'Using parent Xrm.Form.formContext');
+          return parentXrm.Form.formContext;
+        }
+        
+        // Check for classic form
         if (parentXrm.Page && parentXrm.Page.data && parentXrm.Page.data.entity) {
           CrmDataInjector.log('INFO', 'Using parent Xrm.Page form context');
           return parentXrm.Page;
@@ -110,7 +187,11 @@ window.CrmDataInjector = {
         'areaContentIFrame',
         'gridIFrame',
         'inlineGridIFrame',
-        'NavBarGlobalQuickCreate'
+        'NavBarGlobalQuickCreate',
+        'FormPanel', // Unified Interface specific
+        'quickCreateFrame', // Unified Interface specific
+        'entityFormFrame', // Unified Interface specific
+        'entityRecordFrame' // Unified Interface specific
       ];
       
       // Try likely frames by name first
@@ -119,6 +200,14 @@ window.CrmDataInjector = {
           const frame = window.parent.frames[frameName];
           if (frame && frame.Xrm) {
             CrmDataInjector.log('INFO', `Found Xrm in named frame: ${frameName}`);
+            
+            // Try Form first (Unified Interface)
+            if (frame.Xrm.Form && frame.Xrm.Form.formContext) {
+              CrmDataInjector.log('INFO', `Using Xrm.Form.formContext from named frame: ${frameName}`);
+              return frame.Xrm.Form.formContext;
+            }
+            
+            // Fall back to Page
             if (frame.Xrm.Page && frame.Xrm.Page.data && frame.Xrm.Page.data.entity) {
               CrmDataInjector.log('INFO', `Using form context from named frame: ${frameName}`);
               return frame.Xrm.Page;
@@ -135,6 +224,14 @@ window.CrmDataInjector = {
           const frameElement = document.getElementById(frameId);
           if (frameElement && frameElement.contentWindow && frameElement.contentWindow.Xrm) {
             CrmDataInjector.log('INFO', `Found Xrm in frame by ID: ${frameId}`);
+            
+            // Try Form first (Unified Interface)
+            if (frameElement.contentWindow.Xrm.Form && frameElement.contentWindow.Xrm.Form.formContext) {
+              CrmDataInjector.log('INFO', `Using Xrm.Form.formContext from frame ID: ${frameId}`);
+              return frameElement.contentWindow.Xrm.Form.formContext;
+            }
+            
+            // Fall back to Page
             if (frameElement.contentWindow.Xrm.Page && 
                 frameElement.contentWindow.Xrm.Page.data && 
                 frameElement.contentWindow.Xrm.Page.data.entity) {
@@ -145,6 +242,37 @@ window.CrmDataInjector = {
         } catch (idError) {
           // Ignore cross-origin errors
         }
+      }
+      
+      // Look in specific Unified Interface iframes that may not have standard names
+      try {
+        const iframes = document.getElementsByTagName('iframe');
+        for (let i = 0; i < iframes.length; i++) {
+          try {
+            const frame = iframes[i];
+            const contentWindow = frame.contentWindow;
+            
+            if (contentWindow && contentWindow.Xrm) {
+              CrmDataInjector.log('INFO', `Found Xrm in iframe[${i}]`);
+              
+              // Try Form first (Unified Interface)
+              if (contentWindow.Xrm.Form && contentWindow.Xrm.Form.formContext) {
+                CrmDataInjector.log('INFO', `Using Xrm.Form.formContext from iframe[${i}]`);
+                return contentWindow.Xrm.Form.formContext;
+              }
+              
+              // Fall back to Page
+              if (contentWindow.Xrm.Page && contentWindow.Xrm.Page.data && contentWindow.Xrm.Page.data.entity) {
+                CrmDataInjector.log('INFO', `Using Xrm.Page form context from iframe[${i}]`);
+                return contentWindow.Xrm.Page;
+              }
+            }
+          } catch (frameErr) {
+            // Ignore cross-origin errors
+          }
+        }
+      } catch (iframesErr) {
+        CrmDataInjector.log('WARNING', 'Error searching iframes: ' + iframesErr.message);
       }
       
       // Use the recursive approach as a fallback
@@ -166,9 +294,50 @@ window.CrmDataInjector = {
     try {
       // Check current window
       if (windowObj.Xrm) {
+        // Check for Unified Interface form first
+        if (windowObj.Xrm.Form && windowObj.Xrm.Form.formContext) {
+          CrmDataInjector.log('INFO', 'Found Xrm.Form.formContext in frame');
+          return windowObj.Xrm.Form.formContext;
+        }
+        
+        // Check for App methods (Unified Interface)
+        if (windowObj.Xrm.App) {
+          try {
+            if (typeof windowObj.Xrm.App.findFormContext === 'function') {
+              const formCtx = windowObj.Xrm.App.findFormContext();
+              if (formCtx) {
+                CrmDataInjector.log('INFO', 'Found form context via Xrm.App.findFormContext in frame');
+                return formCtx;
+              }
+            }
+          } catch (appErr) {
+            // Ignore errors in App.findFormContext
+          }
+        }
+        
+        // Fall back to classic Page object
         if (windowObj.Xrm.Page && windowObj.Xrm.Page.data && windowObj.Xrm.Page.data.entity) {
-          CrmDataInjector.log('INFO', 'Found Xrm in frame');
+          CrmDataInjector.log('INFO', 'Found Xrm.Page in frame');
           return windowObj.Xrm.Page;
+        }
+        
+        // Create a synthetic context if we have entity data but no form
+        if (windowObj.Xrm.Page && windowObj.Xrm.Page.data && windowObj.Xrm.Page.data.entity) {
+          try {
+            CrmDataInjector.log('INFO', 'Creating synthetic form context in frame');
+            return {
+              data: windowObj.Xrm.Page.data,
+              ui: windowObj.Xrm.Page.ui,
+              getAttribute: function(name) {
+                return windowObj.Xrm.Page.getAttribute(name);
+              },
+              getControl: function(name) {
+                return windowObj.Xrm.Page.getControl(name);
+              }
+            };
+          } catch (synthErr) {
+            // Ignore synthetic context errors
+          }
         }
       }
       
@@ -178,8 +347,30 @@ window.CrmDataInjector = {
           var frame = windowObj.frames[i];
           // Try to access the frame (may fail due to cross-origin policy)
           if (frame.Xrm) {
+            // Check for Unified Interface form first
+            if (frame.Xrm.Form && frame.Xrm.Form.formContext) {
+              CrmDataInjector.log('INFO', 'Found Xrm.Form.formContext in child frame ' + i);
+              return frame.Xrm.Form.formContext;
+            }
+            
+            // Check for App methods (Unified Interface)
+            if (frame.Xrm.App) {
+              try {
+                if (typeof frame.Xrm.App.findFormContext === 'function') {
+                  const formCtx = frame.Xrm.App.findFormContext();
+                  if (formCtx) {
+                    CrmDataInjector.log('INFO', 'Found form context via Xrm.App.findFormContext in child frame ' + i);
+                    return formCtx;
+                  }
+                }
+              } catch (appErr) {
+                // Ignore errors in App.findFormContext
+              }
+            }
+            
+            // Fall back to classic Page object
             if (frame.Xrm.Page && frame.Xrm.Page.data && frame.Xrm.Page.data.entity) {
-              CrmDataInjector.log('INFO', 'Found Xrm in child frame ' + i);
+              CrmDataInjector.log('INFO', 'Found Xrm.Page in child frame ' + i);
               return frame.Xrm.Page;
             }
           }
@@ -211,26 +402,124 @@ window.CrmDataInjector = {
       }
       
       var fields = [];
-      var attributes = formContext.data.entity.attributes;
       
-      // Handle collection object
-      if (attributes && typeof attributes.forEach === 'function') {
-        attributes.forEach(function(attribute) {
-          try {
-            fields.push({
-              name: attribute.getName(),
-              type: attribute.getAttributeType(),
-              value: attribute.getValue(),
-              isDirty: attribute.getIsDirty(),
-              isRequired: attribute.getRequiredLevel() === 'required'
+      // Handle various form context structures
+      // First check if we have the expected entity.attributes collection
+      if (formContext.data && formContext.data.entity && formContext.data.entity.attributes) {
+        try {
+          var attributes = formContext.data.entity.attributes;
+          
+          // Handle collection object
+          if (attributes && typeof attributes.forEach === 'function') {
+            attributes.forEach(function(attribute) {
+              try {
+                fields.push({
+                  name: attribute.getName(),
+                  type: attribute.getAttributeType(),
+                  value: attribute.getValue(),
+                  isDirty: attribute.getIsDirty(),
+                  isRequired: attribute.getRequiredLevel() === 'required'
+                });
+              } catch (attrError) {
+                CrmDataInjector.log('WARNING', 'Error processing attribute: ' + attrError.message);
+              }
             });
-          } catch (attrError) {
-            CrmDataInjector.log('WARNING', 'Error processing attribute: ' + attrError.message);
+          } else {
+            // If forEach is not available but it's still an object with properties
+            for (var attrName in attributes) {
+              if (attributes.hasOwnProperty(attrName)) {
+                try {
+                  var attribute = attributes[attrName];
+                  
+                  // Ensure it has the expected interface
+                  if (attribute && typeof attribute.getName === 'function') {
+                    fields.push({
+                      name: attribute.getName(),
+                      type: attribute.getAttributeType ? attribute.getAttributeType() : 'unknown',
+                      value: attribute.getValue ? attribute.getValue() : null,
+                      isDirty: attribute.getIsDirty ? attribute.getIsDirty() : false,
+                      isRequired: attribute.getRequiredLevel ? attribute.getRequiredLevel() === 'required' : false
+                    });
+                  }
+                } catch (propError) {
+                  CrmDataInjector.log('WARNING', 'Error processing attribute property: ' + propError.message);
+                }
+              }
+            }
+          }
+        } catch (attrsError) {
+          CrmDataInjector.log('WARNING', 'Error accessing attributes collection: ' + attrsError.message);
+        }
+      } 
+      // Alternative approach - try to use getAttribute with common field names
+      else if (formContext.getAttribute && typeof formContext.getAttribute === 'function') {
+        CrmDataInjector.log('INFO', 'Using getAttribute method to find fields');
+        
+        // Try common field names
+        var commonFields = [
+          // Contact fields
+          'firstname', 'lastname', 'fullname', 'jobtitle', 'parentcustomerid',
+          'telephone1', 'telephone2', 'mobilephone', 'emailaddress1', 'websiteurl',
+          'address1_line1', 'address1_city', 'address1_stateorprovince', 'address1_postalcode', 'address1_country',
+          
+          // Account fields
+          'name', 'accountnumber', 'revenue', 'numberofemployees', 'description',
+          'address1_composite', 'industrycode', 'ownerid', 'primarycontactid',
+          
+          // Opportunity fields
+          'name', 'customerid', 'description', 'estimatedvalue', 'estimatedclosedate',
+          'stepname', 'probabilitycode', 'statuscode', 'actualvalue',
+          
+          // Case fields
+          'title', 'customerid', 'casetypecode', 'prioritycode', 'statuscode',
+          
+          // Lead fields
+          'subject', 'firstname', 'lastname', 'companyname', 'leadsourcecode'
+        ];
+        
+        // Use a Set to avoid duplicates
+        var uniqueFields = new Set(commonFields);
+        
+        // Try to get each field
+        uniqueFields.forEach(function(fieldName) {
+          try {
+            var attribute = formContext.getAttribute(fieldName);
+            if (attribute) {
+              fields.push({
+                name: attribute.getName(),
+                type: attribute.getAttributeType ? attribute.getAttributeType() : 'unknown',
+                value: attribute.getValue ? attribute.getValue() : null,
+                isDirty: attribute.getIsDirty ? attribute.getIsDirty() : false,
+                isRequired: attribute.getRequiredLevel ? attribute.getRequiredLevel() === 'required' : false
+              });
+            }
+          } catch (fieldError) {
+            // Ignore errors for individual fields
           }
         });
       }
       
-      CrmDataInjector.log('INFO', 'Retrieved ' + fields.length + ' form fields');
+      // Always log diagnostic information
+      if (fields.length === 0) {
+        // Log that we failed to get fields, with context diagnostics
+        try {
+          var diagnostics = {
+            hasFormContext: !!formContext,
+            hasData: !!(formContext && formContext.data),
+            hasEntity: !!(formContext && formContext.data && formContext.data.entity),
+            hasAttributes: !!(formContext && formContext.data && formContext.data.entity && formContext.data.entity.attributes),
+            hasGetAttribute: typeof formContext.getAttribute === 'function',
+            properties: Object.keys(formContext || {}).join(', ')
+          };
+          
+          CrmDataInjector.log('WARNING', 'Failed to retrieve fields. Diagnostics: ' + JSON.stringify(diagnostics));
+        } catch (diagError) {
+          CrmDataInjector.log('ERROR', 'Error generating diagnostics: ' + diagError.message);
+        }
+      } else {
+        CrmDataInjector.log('INFO', 'Retrieved ' + fields.length + ' form fields');
+      }
+      
       return fields;
     } catch (e) {
       CrmDataInjector.log('ERROR', 'Error getting form fields: ' + e.message);
