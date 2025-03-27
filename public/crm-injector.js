@@ -949,17 +949,193 @@ window.CrmDataInjector = {
         return false;
       }
       
-      var successCount = 0;
-      var totalFields = Object.keys(fieldValues).length;
+      // Get the form context first and log detailed diagnostic info
+      var formContext = CrmDataInjector.getFormContext();
       
-      for (var field in fieldValues) {
-        if (CrmDataInjector.setFieldValue(field, fieldValues[field])) {
-          successCount++;
+      if (!formContext) {
+        CrmDataInjector.log('ERROR', 'Form context not available for filling fields');
+        
+        // Try the direct Xrm approach if form context is not found
+        if (typeof Xrm !== 'undefined' && Xrm.Page) {
+          CrmDataInjector.log('INFO', 'Attempting direct Xrm.Page approach as fallback');
+          formContext = Xrm.Page;
+        } else {
+          // Log additional diagnostic information to help debug
+          var diagInfo = {
+            hasXrm: typeof Xrm !== 'undefined',
+            hasWindow: typeof window !== 'undefined',
+            hasParent: typeof window.parent !== 'undefined',
+            hasParentXrm: window.parent && typeof window.parent.Xrm !== 'undefined',
+            url: window.location.href,
+            frameCount: window.frames ? window.frames.length : 0,
+            iframeCount: document.getElementsByTagName('iframe').length
+          };
+          
+          CrmDataInjector.log('ERROR', 'Unable to get form context. Diagnostics: ' + JSON.stringify(diagInfo));
+          return false;
         }
       }
       
-      CrmDataInjector.log('INFO', 'Successfully filled ' + successCount + '/' + totalFields + ' fields');
-      return successCount > 0;
+      // Prepare field operations
+      var totalFields = Object.keys(fieldValues).length;
+      var successCount = 0;
+      var failedFields = [];
+      var formType = 'unknown';
+      var entityName = 'unknown';
+      
+      // Try to get form and entity info for diagnostics
+      try {
+        if (formContext.ui && formContext.ui.getFormType) {
+          formType = formContext.ui.getFormType();
+        }
+        
+        if (formContext.data && formContext.data.entity && formContext.data.entity.getEntityName) {
+          entityName = formContext.data.entity.getEntityName();
+        }
+        
+        CrmDataInjector.log('INFO', `Filling fields on ${entityName} form (type: ${formType})`);
+      } catch (infoError) {
+        CrmDataInjector.log('WARNING', 'Error getting form info: ' + infoError.message);
+      }
+      
+      // Verify form is ready for input
+      if (formContext.data && formContext.data.entity && 
+          typeof formContext.data.entity.getIsDirty === 'function') {
+        try {
+          var isDirtyBefore = formContext.data.entity.getIsDirty();
+          CrmDataInjector.log('INFO', `Form dirty state before filling: ${isDirtyBefore}`);
+        } catch (dirtyError) {
+          CrmDataInjector.log('WARNING', 'Error checking form dirty state: ' + dirtyError.message);
+        }
+      }
+      
+      // First try to get all existing attributes to log available fields
+      var availableFields = [];
+      try {
+        if (formContext.data && formContext.data.entity && 
+            formContext.data.entity.attributes && 
+            typeof formContext.data.entity.attributes.forEach === 'function') {
+          
+          formContext.data.entity.attributes.forEach(function(attr) {
+            try {
+              if (attr && typeof attr.getName === 'function') {
+                availableFields.push(attr.getName());
+              }
+            } catch (attrErr) {
+              // Ignore individual attribute errors
+            }
+          });
+          
+          CrmDataInjector.log('INFO', `Available fields: ${availableFields.join(', ')}`);
+        }
+      } catch (fieldsError) {
+        CrmDataInjector.log('WARNING', 'Error enumerating available fields: ' + fieldsError.message);
+      }
+      
+      // Process field values
+      for (var field in fieldValues) {
+        try {
+          CrmDataInjector.log('INFO', `Attempting to set field: ${field} = ${fieldValues[field]}`);
+          
+          // Check if field exists
+          var hasField = false;
+          
+          if (typeof formContext.getAttribute === 'function') {
+            try {
+              var attribute = formContext.getAttribute(field);
+              hasField = !!attribute;
+              if (!hasField) {
+                CrmDataInjector.log('WARNING', `Field "${field}" not found directly`);
+                
+                // Try case-insensitive search
+                var matchField = availableFields.find(function(f) {
+                  return f.toLowerCase() === field.toLowerCase();
+                });
+                
+                if (matchField) {
+                  CrmDataInjector.log('INFO', `Found case-insensitive match for "${field}": "${matchField}"`);
+                  field = matchField; // Use the actual field name with correct case
+                  hasField = true;
+                }
+              }
+            } catch (checkErr) {
+              CrmDataInjector.log('WARNING', `Error checking field existence: ${checkErr.message}`);
+            }
+          }
+          
+          // Try to set the field value with detailed error handling
+          var setSuccess = false;
+          
+          if (hasField || availableFields.length === 0) { // If we didn't enumerate fields, try anyway
+            setSuccess = CrmDataInjector.setFieldValue(field, fieldValues[field]);
+            
+            if (setSuccess) {
+              successCount++;
+              CrmDataInjector.log('INFO', `Successfully set field: ${field}`);
+            } else {
+              failedFields.push({field: field, value: fieldValues[field], reason: 'setValue failed'});
+              CrmDataInjector.log('ERROR', `Failed to set field: ${field}`);
+            }
+          } else {
+            failedFields.push({field: field, value: fieldValues[field], reason: 'field not found'});
+            CrmDataInjector.log('ERROR', `Field not found: ${field}`);
+          }
+        } catch (fieldError) {
+          failedFields.push({field: field, value: fieldValues[field], reason: fieldError.message});
+          CrmDataInjector.log('ERROR', `Error setting field ${field}: ${fieldError.message}`);
+        }
+      }
+      
+      // Check form dirty state after setting values
+      if (formContext.data && formContext.data.entity && 
+          typeof formContext.data.entity.getIsDirty === 'function') {
+        try {
+          var isDirtyAfter = formContext.data.entity.getIsDirty();
+          CrmDataInjector.log('INFO', `Form dirty state after filling: ${isDirtyAfter}`);
+        } catch (dirtyError) {
+          CrmDataInjector.log('WARNING', 'Error checking form dirty state: ' + dirtyError.message);
+        }
+      }
+      
+      // Direct field setting for special cases
+      if (successCount === 0 && window.Xrm && window.Xrm.Page) {
+        CrmDataInjector.log('INFO', 'Attempting direct Xrm.Page approach as fallback for zero success');
+        
+        try {
+          for (var field in fieldValues) {
+            try {
+              var control = window.Xrm.Page.getControl(field);
+              if (control && typeof control.getAttribute === 'function') {
+                var attr = control.getAttribute();
+                if (attr && typeof attr.setValue === 'function') {
+                  attr.setValue(fieldValues[field]);
+                  successCount++;
+                  CrmDataInjector.log('INFO', `Direct set field: ${field}`);
+                }
+              }
+            } catch (directError) {
+              // Ignore direct set errors for individual fields
+            }
+          }
+        } catch (directApproachError) {
+          CrmDataInjector.log('WARNING', 'Error in direct approach: ' + directApproachError.message);
+        }
+      }
+      
+      // Log the final results
+      if (successCount > 0) {
+        CrmDataInjector.log('INFO', `Successfully filled ${successCount}/${totalFields} fields`);
+        
+        if (failedFields.length > 0) {
+          CrmDataInjector.log('WARNING', `Failed fields: ${JSON.stringify(failedFields)}`);
+        }
+        
+        return true;
+      } else {
+        CrmDataInjector.log('ERROR', `Failed to fill any fields. Fields attempted: ${JSON.stringify(Object.keys(fieldValues))}`);
+        CrmDataInjector.log('ERROR', `Failed fields detail: ${JSON.stringify(failedFields)}`);
+        return false;
+      }
     } catch (e) {
       CrmDataInjector.log('ERROR', 'Error filling form fields: ' + e.message);
       return false;

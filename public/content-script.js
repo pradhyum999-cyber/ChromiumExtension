@@ -445,11 +445,49 @@ const dynamicsCRM = {
       
       // Try multiple approaches to get the attribute
       let attribute = null;
+      let allFieldNames = [];
       
       // Method 1: Direct getAttribute method
       if (typeof formContext.getAttribute === 'function') {
         try {
           attribute = formContext.getAttribute(fieldName);
+          
+          // If not found directly, try case-insensitive search
+          if (!attribute) {
+            logToExtension("DEBUG", `Field '${fieldName}' not found directly, trying case-insensitive search`);
+            
+            // Try to get all attributes to search by name
+            try {
+              // For Unified Interface with attributes collection
+              if (formContext.data && formContext.data.entity && 
+                  formContext.data.entity.attributes && 
+                  typeof formContext.data.entity.attributes.forEach === 'function') {
+                
+                const matchingAttributes = [];
+                formContext.data.entity.attributes.forEach(attr => {
+                  try {
+                    if (attr && typeof attr.getName === 'function') {
+                      const attrName = attr.getName();
+                      allFieldNames.push(attrName);
+                      
+                      if (attrName.toLowerCase() === fieldName.toLowerCase()) {
+                        matchingAttributes.push(attr);
+                      }
+                    }
+                  } catch (err) {
+                    // Ignore errors for individual attributes
+                  }
+                });
+                
+                if (matchingAttributes.length > 0) {
+                  attribute = matchingAttributes[0];
+                  logToExtension("INFO", `Found case-insensitive match for '${fieldName}': '${attribute.getName()}'`);
+                }
+              }
+            } catch (searchError) {
+              logToExtension("DEBUG", `Error during case-insensitive search: ${searchError.message}`);
+            }
+          }
         } catch (e) {
           logToExtension("DEBUG", `Could not get attribute using getAttribute: ${e.message}`);
         }
@@ -458,30 +496,105 @@ const dynamicsCRM = {
       // Method 2: Modern Unified Interface
       if (!attribute && typeof formContext.data !== 'undefined' && 
           typeof formContext.data.entity !== 'undefined' && 
-          typeof formContext.data.entity.attributes !== 'undefined' && 
-          typeof formContext.data.entity.attributes.get === 'function') {
+          typeof formContext.data.entity.attributes !== 'undefined') {
+          
         try {
-          attribute = formContext.data.entity.attributes.get(fieldName);
+          // Try collection.get() approach
+          if (typeof formContext.data.entity.attributes.get === 'function') {
+            try {
+              attribute = formContext.data.entity.attributes.get(fieldName);
+            } catch (getError) {
+              logToExtension("DEBUG", `Error using attributes.get: ${getError.message}`);
+            }
+          }
+          
+          // Try direct property access
+          if (!attribute && formContext.data.entity.attributes[fieldName]) {
+            attribute = formContext.data.entity.attributes[fieldName];
+            logToExtension("INFO", `Found attribute via direct property access`);
+          }
+          
+          // Try case-insensitive search for Unified Interface
+          if (!attribute) {
+            const attributes = formContext.data.entity.attributes;
+            
+            // Check each attribute name
+            for (const attrName in attributes) {
+              if (attributes.hasOwnProperty(attrName) && 
+                  typeof attrName === 'string' && 
+                  attrName.toLowerCase() === fieldName.toLowerCase()) {
+                attribute = attributes[attrName];
+                logToExtension("INFO", `Found attribute via property name matching: ${attrName}`);
+                break;
+              }
+            }
+          }
         } catch (e) {
-          logToExtension("DEBUG", `Could not get attribute using entity.attributes.get: ${e.message}`);
+          logToExtension("DEBUG", `Could not get attribute using entity.attributes approaches: ${e.message}`);
         }
       }
       
       // Method 3: Get control first, then attribute (for some CRM versions)
-      if (!attribute && formContext.ui && formContext.ui.controls && 
-          typeof formContext.ui.controls.get === 'function') {
+      if (!attribute && formContext.ui && formContext.ui.controls) {
         try {
-          const control = formContext.ui.controls.get(fieldName);
+          let control = null;
+          
+          // Try controls.get method
+          if (typeof formContext.ui.controls.get === 'function') {
+            try {
+              control = formContext.ui.controls.get(fieldName);
+            } catch (getError) {
+              logToExtension("DEBUG", `Error using controls.get: ${getError.message}`);
+            }
+          }
+          
+          // Try controls forEach to find by name (case-insensitive)
+          if (!control && typeof formContext.ui.controls.forEach === 'function') {
+            formContext.ui.controls.forEach(ctrl => {
+              try {
+                if (ctrl && typeof ctrl.getName === 'function') {
+                  const ctrlName = ctrl.getName();
+                  if (ctrlName.toLowerCase() === fieldName.toLowerCase()) {
+                    control = ctrl;
+                  }
+                }
+              } catch (ctrlError) {
+                // Ignore individual control errors
+              }
+            });
+          }
+          
+          // Get attribute from control
           if (control && typeof control.getAttribute === 'function') {
             attribute = control.getAttribute();
+            logToExtension("INFO", `Found attribute via control: ${control.getName()}`);
           }
         } catch (e) {
           logToExtension("DEBUG", `Could not get attribute from control: ${e.message}`);
         }
       }
       
+      // Method 4: Try direct Xrm object (last resort)
+      if (!attribute && typeof Xrm !== 'undefined' && Xrm.Page) {
+        try {
+          if (typeof Xrm.Page.getAttribute === 'function') {
+            attribute = Xrm.Page.getAttribute(fieldName);
+            if (attribute) {
+              logToExtension("INFO", `Found attribute via direct Xrm.Page: ${fieldName}`);
+            }
+          }
+        } catch (xrmError) {
+          logToExtension("DEBUG", `Error accessing Xrm.Page: ${xrmError.message}`);
+        }
+      }
+      
       if (!attribute) {
-        logToExtension("ERROR", `Field '${fieldName}' not found on form using any method`);
+        // Log all field names we found to help diagnose the issue
+        if (allFieldNames.length > 0) {
+          logToExtension("WARNING", `Field '${fieldName}' not found. Available fields: ${allFieldNames.join(', ')}`);
+        } else {
+          logToExtension("ERROR", `Field '${fieldName}' not found on form using any method`);
+        }
         return false;
       }
       

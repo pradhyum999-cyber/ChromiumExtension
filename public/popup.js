@@ -219,34 +219,143 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Fill form data in active tab
   function fillFormData(templateType, contactOnly = false) {
+    debugInfoElement.textContent = "Starting fill form process...";
+    
     checkForCrmPage(function(isCrm, tabId) {
       if (!isCrm) {
         updateStatus("Not a Dynamics CRM page. Please navigate to a CRM form.", true);
+        debugInfoElement.textContent = "Page is not recognized as Dynamics CRM.";
         return;
       }
       
       const selectedTemplate = templates[templateType];
       if (!selectedTemplate) {
         updateStatus("Template not found.", true);
+        debugInfoElement.textContent = "Selected template not found.";
         return;
       }
       
-      // Send data to content script
-      chrome.tabs.sendMessage(tabId, { 
-        action: "fillForm",
-        data: selectedTemplate,
-        contactOnly: contactOnly
-      }, function(response) {
-        if (chrome.runtime.lastError) {
-          updateStatus("Error: " + chrome.runtime.lastError.message, true);
-          return;
-        }
+      // Prepare the data - filter it if we're only doing contact fields
+      let dataToSend = {...selectedTemplate};
+      
+      if (contactOnly) {
+        // Filter to only include contact-related fields
+        const contactFields = [
+          'firstname', 'lastname', 'fullname', 'jobtitle', 
+          'emailaddress1', 'telephone1', 'mobilephone', 
+          'address1_line1', 'address1_city', 'address1_stateorprovince', 
+          'address1_postalcode', 'address1_country'
+        ];
         
-        if (response && response.success) {
-          updateStatus("Form filled successfully with " + templateType + " template.");
-        } else {
-          updateStatus("Failed to fill form: " + (response ? response.message : "Unknown error"), true);
+        let contactData = {};
+        for (const field of contactFields) {
+          if (dataToSend[field] !== undefined) {
+            contactData[field] = dataToSend[field];
+          }
         }
+        dataToSend = contactData;
+      }
+      
+      debugInfoElement.textContent = "Sending form data to page...";
+      
+      // First try to force script injection to ensure our scripts are properly loaded
+      chrome.tabs.sendMessage(tabId, { action: "injectCrmScript" }, function(injectionResponse) {
+        // Ignore injection errors, we'll try to fill the form anyway
+        
+        // Add a slight delay to allow injection to complete
+        setTimeout(() => {
+          // Send data to content script
+          chrome.tabs.sendMessage(tabId, { 
+            action: "fillForm",
+            data: dataToSend,
+            contactOnly: contactOnly
+          }, function(response) {
+            if (chrome.runtime.lastError) {
+              const errorMsg = "Error communicating with page: " + chrome.runtime.lastError.message;
+              updateStatus(errorMsg, true);
+              debugInfoElement.textContent = errorMsg;
+              
+              // Try an alternative approach - use executeScript directly
+              chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                function: (data) => {
+                  // This code runs directly in the page context
+                  console.log("Direct script execution for form filling");
+                  
+                  try {
+                    // Try to find Xrm directly in page context
+                    if (typeof Xrm !== 'undefined' && Xrm.Page) {
+                      let filled = 0;
+                      
+                      for (const [field, value] of Object.entries(data)) {
+                        try {
+                          const attribute = Xrm.Page.getAttribute(field);
+                          if (attribute && typeof attribute.setValue === 'function') {
+                            attribute.setValue(value);
+                            filled++;
+                          }
+                        } catch (fieldError) {
+                          console.error(`Error setting ${field}:`, fieldError);
+                        }
+                      }
+                      
+                      return { success: filled > 0, filledCount: filled };
+                    }
+                    
+                    return { success: false, error: "Xrm not found in page context" };
+                  } catch (e) {
+                    return { success: false, error: e.message };
+                  }
+                },
+                args: [dataToSend]
+              }, (results) => {
+                if (chrome.runtime.lastError) {
+                  updateStatus("All approaches failed to fill form.", true);
+                  debugInfoElement.textContent = "Failed to execute direct script: " + chrome.runtime.lastError.message;
+                  return;
+                }
+                
+                const directResult = results && results[0] && results[0].result;
+                
+                if (directResult && directResult.success) {
+                  updateStatus(`Form filled successfully using direct execution (${directResult.filledCount} fields).`);
+                  debugInfoElement.textContent = "Used direct script execution as fallback.";
+                } else {
+                  updateStatus("Failed to fill form with all methods.", true);
+                  debugInfoElement.textContent = directResult ? directResult.error : "Unknown error in direct execution";
+                }
+              });
+              return;
+            }
+            
+            if (response && response.success) {
+              updateStatus("Form filled successfully with " + templateType + " template.");
+              debugInfoElement.textContent = response.details || "Form fill complete.";
+            } else {
+              updateStatus("Failed to fill form: " + (response && response.message ? response.message : "Unknown error"), true);
+              debugInfoElement.textContent = response && response.details ? 
+                response.details : "No additional error details available.";
+              
+              // Try a second approach with form detection first
+              chrome.tabs.sendMessage(tabId, { action: "detectForm" }, function(formInfo) {
+                if (formInfo && formInfo.entity) {
+                  debugInfoElement.textContent = `Detected ${formInfo.entity} form with ${formInfo.fieldCount || 0} fields. Retrying...`;
+                  
+                  // Retry with more specific entity information
+                  chrome.tabs.sendMessage(tabId, { 
+                    action: "fillFormWithEntity",
+                    data: dataToSend,
+                    entityInfo: formInfo
+                  }, function(retry) {
+                    if (retry && retry.success) {
+                      updateStatus(`Form filled on retry (${formInfo.entity} form).`);
+                    }
+                  });
+                }
+              });
+            }
+          });
+        }, 500); // Short delay to allow injection to complete
       });
     });
   }
