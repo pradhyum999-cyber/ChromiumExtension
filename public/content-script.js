@@ -669,5 +669,76 @@ async function initContentScript() {
   }
 }
 
+// Helper to inject our script into the page context
+function injectCrmScript() {
+  return new Promise((resolve, reject) => {
+    try {
+      // Check if script is already injected
+      if (window.injectedCrmScript) {
+        resolve();
+        return;
+      }
+      
+      // First try the chrome.scripting API (requires scripting permission)
+      if (chrome.scripting) {
+        chrome.scripting.executeScript({
+          target: { tabId: -1, allFrames: true }, // -1 means current tab
+          func: injectScriptTag,
+          args: [chrome.runtime.getURL('crm-injector.js')]
+        }).then(() => {
+          window.injectedCrmScript = true;
+          logToExtension("INFO", "Script injected using chrome.scripting API");
+          resolve();
+        }).catch(error => {
+          logToExtension("WARNING", "Failed to inject script using chrome.scripting API: " + error.message);
+          // Fall back to script tag method
+          injectScriptTag(chrome.runtime.getURL('crm-injector.js'));
+          window.injectedCrmScript = true;
+          resolve();
+        });
+      } else {
+        // Fallback method using a script tag
+        injectScriptTag(chrome.runtime.getURL('crm-injector.js'));
+        window.injectedCrmScript = true;
+        resolve();
+      }
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+// Function to be executed in the page context to inject a script tag
+function injectScriptTag(scriptUrl) {
+  const script = document.createElement('script');
+  script.src = scriptUrl;
+  script.onload = function() {
+    this.remove(); // Remove the script tag after loading
+  };
+  (document.head || document.documentElement).appendChild(script);
+}
+
+// Helper to listen for a response from our injected script
+function listenForScriptResponse(command, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      window.removeEventListener('message', responseHandler);
+      reject(new Error('Timeout waiting for response'));
+    }, timeoutMs);
+    
+    function responseHandler(event) {
+      if (event.data && 
+          event.data.type === 'CRM_EXTENSION_RESPONSE' && 
+          event.data.command === command) {
+        clearTimeout(timeout);
+        window.removeEventListener('message', responseHandler);
+        resolve(event.data);
+      }
+    }
+    
+    window.addEventListener('message', responseHandler);
+  });
+}
+
 // Run the content script initialization
 initContentScript();

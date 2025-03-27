@@ -53,12 +53,12 @@
   "permissions": [
     "storage",
     "tabs",
-    "activeTab"
+    "activeTab",
+    "scripting"
   ],
   "optional_permissions": [
     "cookies", 
     "webNavigation",
-    "scripting",
     "bookmarks",
     "notifications"
   ],
@@ -85,7 +85,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["icons/*.png"],
+      "resources": ["icons/*.png", "crm-injector.js"],
       "matches": [
         "*://*.example.com/*", 
         "*://*.example.org/*",

@@ -21,9 +21,9 @@ let extensionState = {
   permissions: {
     storage: true,
     tabs: true,
+    scripting: true,  // Update to reflect our manifest change
     cookies: false,
     webNavigation: false,
-    scripting: false,
     bookmarks: false,
     notifications: false
   },
@@ -298,6 +298,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
       } catch (error) {
         logEvent("ERROR", `Error executing script: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      }
+      break;
+      
+    case "injectCrmScript":
+      try {
+        // Execute script in active tab
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs.length === 0) {
+            sendResponse({ success: false, error: "No active tab found" });
+            return;
+          }
+          
+          const tabId = tabs[0].id;
+          
+          // Execute the script injection in all frames
+          chrome.scripting.executeScript({
+            target: { tabId: tabId, allFrames: true },
+            files: ['crm-injector.js']
+          }, (results) => {
+            if (chrome.runtime.lastError) {
+              logEvent("ERROR", `Script injection failed: ${chrome.runtime.lastError.message}`);
+              sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              logEvent("INFO", `CRM script injected in tab ${tabId}`);
+              sendResponse({ success: true });
+            }
+          });
+        });
+      } catch (error) {
+        logEvent("ERROR", `Error injecting CRM script: ${error.message}`);
         sendResponse({ success: false, error: error.message });
       }
       break;

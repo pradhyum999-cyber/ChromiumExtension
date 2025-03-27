@@ -5,7 +5,9 @@ document.addEventListener('DOMContentLoaded', function() {
   const templateSelector = document.getElementById('template-selector');
   const fillAllButton = document.getElementById('fill-all');
   const fillContactButton = document.getElementById('fill-contact');
+  const forceInjectionButton = document.getElementById('force-injection');
   const statusElement = document.getElementById('status');
+  const debugInfoElement = document.getElementById('debug-info');
   
   // Template data for different entity types
   const templates = {
@@ -192,6 +194,67 @@ document.addEventListener('DOMContentLoaded', function() {
     const templateType = templateSelector.value;
     updateStatus("Filling contact information...");
     fillFormData(templateType, true);
+  });
+  
+  // Handle force injection button click
+  forceInjectionButton.addEventListener('click', function() {
+    debugInfoElement.textContent = "Attempting to force script injection...";
+    
+    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+      if (!tabs || tabs.length === 0) {
+        debugInfoElement.textContent = "ERROR: No active tab found";
+        return;
+      }
+      
+      const activeTab = tabs[0];
+      
+      // First try injecting with the background script
+      chrome.runtime.sendMessage({ 
+        action: "injectCrmScript"
+      }, function(response) {
+        if (chrome.runtime.lastError) {
+          debugInfoElement.textContent += "\nBackground script error: " + chrome.runtime.lastError.message;
+          
+          // Try direct method as fallback
+          chrome.tabs.sendMessage(activeTab.id, { 
+            action: "injectCrmScript"
+          }, function(contentResponse) {
+            if (chrome.runtime.lastError) {
+              debugInfoElement.textContent += "\nContent script error: " + chrome.runtime.lastError.message;
+              return;
+            }
+            
+            debugInfoElement.textContent += "\nContent script response: " + JSON.stringify(contentResponse);
+          });
+          
+          return;
+        }
+        
+        debugInfoElement.textContent += "\nBackground script response: " + JSON.stringify(response);
+        
+        // Now test the connection to verify it worked
+        setTimeout(() => {
+          chrome.tabs.sendMessage(activeTab.id, { 
+            action: "TEST_CONNECTION" 
+          }, function(testResponse) {
+            if (chrome.runtime.lastError) {
+              debugInfoElement.textContent += "\nTest connection error: " + chrome.runtime.lastError.message;
+              return;
+            }
+            
+            debugInfoElement.textContent += "\nTest connection response: " + JSON.stringify(testResponse);
+            
+            if (testResponse && testResponse.success) {
+              debugInfoElement.textContent += "\n✅ CONNECTION SUCCESSFUL!";
+              updateStatus("Script injection successful!", false);
+            } else {
+              debugInfoElement.textContent += "\n❌ CONNECTION FAILED";
+              updateStatus("Script injection failed", true);
+            }
+          });
+        }, 1000); // Give the injection a second to complete
+      });
+    });
   });
   
   // Initial status check
