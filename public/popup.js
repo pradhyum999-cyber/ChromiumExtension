@@ -59,25 +59,91 @@ document.addEventListener('DOMContentLoaded', function() {
     chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
       const activeTab = tabs[0];
       if (!activeTab) {
+        updateStatus("No active tab found", true);
         callback(false);
         return;
       }
 
+      // Show URL of the active tab
+      console.log("Checking tab:", activeTab.url);
+      
       // Check if we can inject into this page
       chrome.tabs.sendMessage(activeTab.id, { action: "checkCrm" }, function(response) {
-        if (chrome.runtime.lastError || !response || !response.isCrm) {
+        if (chrome.runtime.lastError) {
+          const errorMessage = chrome.runtime.lastError.message;
+          console.log("Extension error:", errorMessage);
+          updateStatus("Cannot communicate with page", true, 
+            `Error: ${errorMessage}\nURL: ${activeTab.url}\nMake sure content scripts can run on this page.`);
           callback(false);
           return;
         }
+        
+        if (!response) {
+          updateStatus("No response from content script", true, 
+            `URL: ${activeTab.url}\nPossible reasons:\n- Content script not injected\n- Page is not compatible`);
+          callback(false);
+          return;
+        }
+        
+        console.log("CRM check response:", response);
+        
+        // Show detailed debugging information
+        const details = {
+          url: response.url || activeTab.url,
+          isDynamicsDomain: response.isDynamicsDomain,
+          hasXrm: response.hasXrm,
+          hasCrmUrlPattern: response.hasCrmUrlPattern,
+          isCrm: response.isCrm,
+          hasForm: response.hasForm
+        };
+        
+        if (!response.isCrm) {
+          updateStatus("Not a Dynamics CRM page", true, 
+            `The page doesn't appear to be a Dynamics CRM form. Debug info:\n${JSON.stringify(details, null, 2)}`);
+          callback(false);
+          return;
+        }
+        
+        if (!response.hasForm) {
+          updateStatus("No form detected in CRM", true, 
+            `Detected a CRM page, but no form is available. Debug info:\n${JSON.stringify(details, null, 2)}`);
+          callback(false, activeTab.id);
+          return;
+        }
+        
+        updateStatus("Ready to fill form data in Dynamics CRM", false, 
+          `CRM detected and form is available. Debug info:\n${JSON.stringify(details, null, 2)}`);
         callback(true, activeTab.id);
       });
     });
   }
   
   // Update status message
-  function updateStatus(message, isError = false) {
+  function updateStatus(message, isError = false, details = null) {
     statusElement.textContent = message;
     statusElement.style.color = isError ? "#e74c3c" : "#7f8c8d";
+    
+    // If detailed debugging info is provided, show it in a smaller font below
+    if (details) {
+      let detailsDiv = document.getElementById('status-details');
+      if (!detailsDiv) {
+        detailsDiv = document.createElement('div');
+        detailsDiv.id = 'status-details';
+        detailsDiv.style.fontSize = '10px';
+        detailsDiv.style.marginTop = '10px';
+        detailsDiv.style.color = '#7f8c8d';
+        detailsDiv.style.whiteSpace = 'pre-wrap';
+        detailsDiv.style.wordBreak = 'break-all';
+        statusElement.parentNode.appendChild(detailsDiv);
+      }
+      
+      detailsDiv.textContent = typeof details === 'string' ? details : JSON.stringify(details, null, 2);
+    } else {
+      const detailsDiv = document.getElementById('status-details');
+      if (detailsDiv) {
+        detailsDiv.remove();
+      }
+    }
   }
   
   // Fill form data in active tab

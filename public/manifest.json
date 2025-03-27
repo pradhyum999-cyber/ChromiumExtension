@@ -109,7 +109,7 @@
   "minimum_chrome_version": "88",
   "browser_specific_settings": {
     "edge": {
-      "browser_action_next_to_address_bar": true
+      "action_next_to_address_bar": true
     }
   },
   "incognito": "spanning",
@@ -124,7 +124,7 @@
       },
       "description": "Execute a script in the current tab"
     },
-    "_execute_browser_action": {
+    "_execute_action": {
       "suggested_key": {
         "default": "Ctrl+Shift+X",
         "mac": "Command+Shift+X"

@@ -14,18 +14,56 @@ function logToExtension(level, message) {
 const dynamicsCRM = {
   // Check if current page is Dynamics CRM
   isDynamicsCRM() {
+    const url = window.location.href;
+    const hostname = window.location.hostname;
+    
+    // Log detailed information for debugging
+    console.log('CRM Detection - URL:', url);
+    console.log('CRM Detection - Hostname:', hostname);
+    
     // Check for the hostname containing dynamics.com
-    const isDynamicsDomain = window.location.hostname.includes('dynamics.com');
+    const isDynamicsDomain = hostname.includes('dynamics.com');
+    
+    // Special check for org050aaf2f.crm8.dynamics.com pattern
+    const isSpecificOrgDomain = hostname.includes('org050aaf2f.crm8.dynamics.com') || 
+                               hostname.match(/org[a-zA-Z0-9]+\.crm[0-9]+\.dynamics\.com/);
     
     // Check for Xrm object in window or parent
-    const hasXrm = typeof Xrm !== 'undefined' || 
-                  (window.parent && typeof window.parent.Xrm !== 'undefined');
+    let hasXrm = false;
+    try {
+      hasXrm = typeof Xrm !== 'undefined' || 
+              (window.parent && typeof window.parent.Xrm !== 'undefined');
+      
+      console.log('CRM Detection - Window Xrm:', typeof Xrm !== 'undefined');
+      console.log('CRM Detection - Parent Xrm:', window.parent && typeof window.parent.Xrm !== 'undefined');
+    } catch (e) {
+      console.log('CRM Detection - Error checking Xrm:', e.message);
+    }
     
     // Check for common Dynamics CRM URL patterns
-    const hasCrmUrlPattern = window.location.href.includes('/main.aspx') || 
-                            window.location.href.includes('pagetype=entityrecord');
+    const hasCrmUrlPattern = url.includes('/main.aspx') || 
+                           url.includes('pagetype=entityrecord') ||
+                           url.includes('etn=') ||
+                           url.match(/crm[0-9]+\.dynamics\.com/) !== null;
     
-    return isDynamicsDomain && (hasXrm || hasCrmUrlPattern);
+    // Special handling for org050aaf2f.crm8.dynamics.com/main.aspx... pattern
+    if (isSpecificOrgDomain && url.includes('/main.aspx')) {
+      console.log('CRM Detection - Special org domain with main.aspx detected!');
+      return true;
+    }
+    
+    console.log('CRM Detection - isDynamicsDomain:', isDynamicsDomain);
+    console.log('CRM Detection - isSpecificOrgDomain:', isSpecificOrgDomain);
+    console.log('CRM Detection - hasXrm:', hasXrm);
+    console.log('CRM Detection - hasCrmUrlPattern:', hasCrmUrlPattern);
+    
+    // More permissive detection for CRM8 environments
+    if (hostname.includes('.crm8.dynamics.com')) {
+      console.log('CRM Detection - CRM8 domain detected, using more permissive checks');
+      return true;
+    }
+    
+    return (isDynamicsDomain || isSpecificOrgDomain) && (hasXrm || hasCrmUrlPattern);
   },
   
   // Get form context if available
@@ -470,11 +508,44 @@ async function initContentScript() {
         });
       } else if (message.action === "checkCrm") {
         // Check if this is a CRM page
-        const isCrm = dynamicsCRM.isDynamicsCRM();
-        sendResponse({ 
-          isCrm: isCrm,
-          hasForm: isCrm && !!dynamicsCRM.getFormContext()
-        });
+        const isDynamicsDomain = window.location.hostname.includes('dynamics.com');
+    const hasXrm = typeof Xrm !== 'undefined' || 
+                  (window.parent && typeof window.parent.Xrm !== 'undefined');
+    const hasCrmUrlPattern = window.location.href.includes('/main.aspx') || 
+                            window.location.href.includes('pagetype=entityrecord');
+
+    // Detailed debugging information to help diagnose detection issues
+    console.log('CRM Check - URL:', window.location.href);
+    console.log('CRM Check - isDynamicsDomain:', isDynamicsDomain);
+    console.log('CRM Check - hasXrm:', hasXrm);
+    console.log('CRM Check - hasCrmUrlPattern:', hasCrmUrlPattern);
+    
+    const isCrm = dynamicsCRM.isDynamicsCRM();
+    const hasForm = isCrm && !!dynamicsCRM.getFormContext();
+    
+    console.log('CRM Check - isCrm:', isCrm);
+    console.log('CRM Check - hasForm:', hasForm);
+
+    if (isCrm) {
+      try {
+        const formContext = dynamicsCRM.getFormContext();
+        if (formContext) {
+          console.log('CRM Check - Form type:', formContext.ui ? formContext.ui.getFormType() : 'Unknown');
+          console.log('CRM Check - Form name:', document.title);
+        }
+      } catch (e) {
+        console.log('CRM Check - Error getting form details:', e.message);
+      }
+    }
+    
+    sendResponse({ 
+      isCrm: isCrm,
+      hasForm: hasForm,
+      url: window.location.href,
+      isDynamicsDomain: isDynamicsDomain,
+      hasXrm: hasXrm,
+      hasCrmUrlPattern: hasCrmUrlPattern
+    });
       } else if (message.action === "getPageMetrics") {
         // Get page metrics on demand
         const metrics = {
