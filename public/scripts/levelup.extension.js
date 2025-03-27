@@ -90,46 +90,131 @@
      * Find the Xrm object in any available frame
      */
     findXrm: function() {
-      // Check window
+      console.log('Finding Xrm object...');
+      
+      // Method 1: Check window
       if (window.Xrm) {
+        console.log('Found Xrm in window');
         return window.Xrm;
       }
       
-      // Try parent
+      // Method 2: Try parent window
       try {
         if (window.parent && window.parent.Xrm) {
+          console.log('Found Xrm in parent window');
           return window.parent.Xrm;
         }
       } catch (e) {
         // Cross-origin error
+        console.log('Cross-origin error accessing parent:', e.message);
       }
-      
-      // Look in common frame names
+
+      // Method 3: Look in common frame names
       const frameNames = [
         'contentIFrame0',
         'contentIFrame1',
         'contentIFrame2',
         'contentIFrame3',
-        'areaContentIFrame'
+        'areaContentIFrame',
+        'NavBarGloablQuickCreate',
+        'globalQuickCreate_frame',
+        'InlineDialog_Iframe',
+        'dialogFrm',
+        'formContentFrame'
       ];
       
       for (const frameName of frameNames) {
         try {
-          // Try by frame name
-          if (window.parent.frames[frameName] && window.parent.frames[frameName].Xrm) {
+          // Try by frame name in parent
+          if (window.parent && window.parent.frames && window.parent.frames[frameName] && 
+              window.parent.frames[frameName].Xrm) {
+            console.log(`Found Xrm in parent.frames.${frameName}`);
             return window.parent.frames[frameName].Xrm;
-          }
-          
-          // Try by element ID
-          const frameElement = document.getElementById(frameName);
-          if (frameElement && frameElement.contentWindow && frameElement.contentWindow.Xrm) {
-            return frameElement.contentWindow.Xrm;
           }
         } catch (e) {
           // Cross-origin error
+          console.log(`Cross-origin error accessing parent.frames.${frameName}:`, e.message);
+        }
+        
+        try {
+          // Try by element ID
+          const frameElement = document.getElementById(frameName);
+          if (frameElement && frameElement.contentWindow && frameElement.contentWindow.Xrm) {
+            console.log(`Found Xrm in document.getElementById(${frameName}).contentWindow`);
+            return frameElement.contentWindow.Xrm;
+          }
+        } catch (e) {
+          console.log(`Error accessing frameElement.contentWindow for ${frameName}:`, e.message);
         }
       }
       
+      // Method 4: Traverse all frames recursively (expensive but thorough)
+      try {
+        // Define recursive frame traversal function
+        const findXrmInFrames = (win) => {
+          try {
+            if (win.Xrm) {
+              console.log('Found Xrm in a nested frame');
+              return win.Xrm;
+            }
+            
+            // Check each frame in this window
+            if (win.frames && win.frames.length > 0) {
+              for (let i = 0; i < win.frames.length; i++) {
+                try {
+                  const frameXrm = findXrmInFrames(win.frames[i]);
+                  if (frameXrm) return frameXrm;
+                } catch (frameError) {
+                  // Cross-origin error, continue to next frame
+                }
+              }
+            }
+          } catch (traverseError) {
+            // Ignore cross-origin errors
+          }
+          return null;
+        };
+        
+        // Start traversal from top window
+        const topXrm = findXrmInFrames(window.top);
+        if (topXrm) return topXrm;
+      } catch (e) {
+        console.log('Error in recursive frame traversal:', e.message);
+      }
+      
+      // Method 5: Check for global form object (alternative approach)
+      try {
+        if (typeof form !== 'undefined' && form.context) {
+          console.log('Found form.context');
+          return {
+            Page: form.context
+          };
+        }
+      } catch (e) {
+        console.log('Error checking form.context:', e.message);
+      }
+      
+      // Method 6: Last resort - look for global variables with Page properties (could be Xrm)
+      try {
+        for (const key in window) {
+          try {
+            if (window[key] && 
+                typeof window[key] === 'object' && 
+                window[key].Page && 
+                typeof window[key].Page === 'object' &&
+                typeof window[key].Page.data !== 'undefined') {
+              console.log(`Found potential Xrm object in global variable: ${key}`);
+              return window[key];
+            }
+          } catch (propError) {
+            // Skip inaccessible properties
+          }
+        }
+      } catch (e) {
+        console.log('Error in global variables search:', e.message);
+      }
+      
+      console.log('Could not find Xrm in any frame or global object');
       return null;
     },
     
@@ -320,41 +405,124 @@
      */
     testConnection: function() {
       try {
-        const xrm = this.findXrm();
-        if (!xrm) {
-          this.sendResponse('TEST_CONNECTION', { success: false, error: 'Xrm not found' });
-          return;
-        }
-        
-        const formContext = this.getFormContext(xrm);
-        if (!formContext) {
-          this.sendResponse('TEST_CONNECTION', { success: false, error: 'Form context not found' });
-          return;
-        }
-        
-        const pageInfo = {
+        // Gather diagnostic information about the page
+        const diagnostics = {
           url: window.location.href,
           title: document.title,
-          scripts: Array.from(document.scripts).map(s => s.src).filter(s => s.includes('/uclient/') || s.includes('/_static/'))
+          hostname: window.location.hostname,
+          isCrmPage: this.isCrmPage(),
+          hasCrmScripts: Array.from(document.scripts).some(s => 
+            s.src.indexOf('/uclient/scripts') !== -1 || 
+            s.src.indexOf('/_static/_common/scripts/PageLoader.js') !== -1 ||
+            s.src.indexOf('/_static/_common/scripts/crminternalutility.js') !== -1
+          ),
+          frameCount: window.frames ? window.frames.length : 0,
+          iframeCount: document.getElementsByTagName('iframe').length,
+          crmScripts: Array.from(document.scripts).map(s => s.src).filter(s => 
+            s.includes('/uclient/') || 
+            s.includes('/_static/') || 
+            s.includes('crm') || 
+            s.includes('dynamics')
+          ).slice(0, 10) // Limit to 10 scripts to avoid response size issues
         };
         
-        try {
-          pageInfo.entityName = formContext.data.entity.getEntityName();
-          pageInfo.formType = formContext.ui ? formContext.ui.getFormType() : 'Unknown';
-          pageInfo.recordId = formContext.data.entity.getId ? formContext.data.entity.getId() : null;
-        } catch (e) {
-          pageInfo.error = e.message;
+        // Check for Xrm object and handle the case where there's a partial match
+        const xrm = this.findXrm();
+        if (!xrm) {
+          // No Xrm object found at all
+          console.log('No Xrm object found in any frame or global object');
+          this.sendResponse('TEST_CONNECTION', { 
+            success: false, 
+            error: 'Xrm not found',
+            diagnostics: diagnostics,
+            message: 'Could not find Dynamics CRM Xrm object. This page might not be a CRM form.'
+          });
+          return;
         }
         
+        // We have an Xrm object but let's see if we can get the form context
+        const formContext = this.getFormContext(xrm);
+        
+        // Create page info object for diagnostic info
+        const pageInfo = {
+          ...diagnostics,
+          xrmFound: !!xrm,
+          xrmProperties: this.safeGetXrmProperties(xrm)
+        };
+        
+        if (!formContext) {
+          // We found Xrm but no form context
+          this.sendResponse('TEST_CONNECTION', { 
+            success: true,  // Return success even with partial connection
+            partial: true,  // Indicate this is a partial match
+            message: 'Found Xrm object but no form context. You may be on a CRM page but not on a form.',
+            pageInfo: pageInfo
+          });
+          return;
+        }
+        
+        // Try to get entity information if we have a form context
+        try {
+          if (formContext.data && formContext.data.entity) {
+            try { pageInfo.entityName = formContext.data.entity.getEntityName(); } catch (e) {}
+            try { pageInfo.recordId = formContext.data.entity.getId ? formContext.data.entity.getId() : null; } catch (e) {}
+          }
+          
+          if (formContext.ui) {
+            try { pageInfo.formType = formContext.ui.getFormType(); } catch (e) {}
+            try { pageInfo.formName = formContext.ui.formSelector ? formContext.ui.formSelector.getCurrentItem().getLabel() : null; } catch (e) {}
+          }
+        } catch (e) {
+          pageInfo.entityError = e.message;
+        }
+        
+        // Success - we have Xrm and form context
         this.sendResponse('TEST_CONNECTION', { 
           success: true, 
-          entityName: pageInfo.entityName,
-          pageInfo: pageInfo 
+          entityName: pageInfo.entityName || 'Unknown',
+          pageInfo: pageInfo,
+          message: 'Successfully connected to Dynamics CRM form'
         });
       } catch (e) {
         console.error('Error testing connection:', e);
-        this.sendResponse('TEST_CONNECTION', { success: false, error: e.message });
+        this.sendResponse('TEST_CONNECTION', { 
+          success: false, 
+          error: e.message,
+          stack: e.stack
+        });
       }
+    },
+    
+    /**
+     * Safely get Xrm properties for diagnostics
+     */
+    safeGetXrmProperties: function(xrm) {
+      const properties = {};
+      
+      // Safely check properties without crashing
+      try { properties.hasPage = !!xrm.Page; } catch (e) {}
+      try { properties.hasForm = !!xrm.Form; } catch (e) {}
+      try { properties.hasGetCurrentForm = typeof xrm.getCurrentForm === 'function'; } catch (e) {}
+      try { properties.hasContext = !!xrm.context; } catch (e) {}
+      try { properties.hasUi = !!(xrm.Page && xrm.Page.ui); } catch (e) {}
+      try { properties.hasData = !!(xrm.Page && xrm.Page.data); } catch (e) {}
+      try { properties.hasAttributes = !!(xrm.Page && xrm.Page.data && xrm.Page.data.entity && xrm.Page.data.entity.attributes); } catch (e) {}
+      
+      // Try to get version information
+      try { 
+        if (xrm.context && xrm.context.getVersion) {
+          properties.version = xrm.context.getVersion();
+        }
+      } catch (e) {}
+      
+      // Try to get client information
+      try {
+        if (xrm.context && xrm.context.client && xrm.context.client.getClient) {
+          properties.client = xrm.context.client.getClient();
+        }
+      } catch (e) {}
+      
+      return properties;
     },
     
     /**

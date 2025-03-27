@@ -104,63 +104,201 @@ const dynamicsCRM = {
   // Get form context if available
   getFormContext() {
     try {
-      // Try different approaches to get Xrm
-      let xrm = null;
+      logToExtension("INFO", "Attempting to find form context...");
       
-      // Check in window
-      if (typeof window.Xrm !== 'undefined') {
-        xrm = window.Xrm;
-      } 
-      // Check in parent window (iframe scenario)
-      else if (window.parent && typeof window.parent.Xrm !== 'undefined') {
-        xrm = window.parent.Xrm;
-      }
-      // Check for any global variable that might contain Xrm
-      else {
-        for (const key in window) {
-          if (window[key] && typeof window[key].Page !== 'undefined') {
-            xrm = window[key];
-            break;
-          }
-        }
-      }
+      // Enhanced Xrm detection - Methods similar to our Level Up script
+      let xrm = this.findXrm();
       
       if (!xrm) {
         logToExtension("WARNING", "Could not find Xrm object in page");
         return null;
       }
       
+      logToExtension("INFO", "Found Xrm object, looking for form context");
+      
+      // Try getFormContext method first (newest API)
+      if (xrm.Page && xrm.Page.getFormContext) {
+        try {
+          const formContext = xrm.Page.getFormContext();
+          if (formContext) {
+            logToExtension("INFO", "Got form context via xrm.Page.getFormContext()");
+            return formContext;
+          }
+        } catch (e) {
+          logToExtension("DEBUG", `Error using getFormContext: ${e.message}`);
+        }
+      }
+      
       // Modern Xrm API (Unified Interface)
-      if (xrm.Page && xrm.Page.getAttribute) {
+      if (xrm.Page && xrm.Page.data && xrm.Page.data.entity) {
+        logToExtension("INFO", "Got form context via xrm.Page (data.entity exists)");
         return xrm.Page;
       }
       
       // For Unified Interface, try to get the current form context
-      if (xrm.Form && xrm.Form.getAttribute) {
+      if (xrm.Form && xrm.Form.getData) {
+        logToExtension("INFO", "Got form context via xrm.Form");
         return xrm.Form;
       }
       
-      if (xrm.Page && xrm.Page.ui && xrm.Page.ui.getFormType) {
-        return xrm.Page;
-      }
-      
-      // Legacy approach 
-      if (xrm.Page && xrm.Page.getControl) {
-        return xrm.Page;
+      // Try using the page attributes
+      if (xrm.Page) {
+        if (xrm.Page.getAttribute || xrm.Page.ui || xrm.Page.getControl) {
+          logToExtension("INFO", "Got form context via xrm.Page (has getAttribute/ui/getControl)");
+          return xrm.Page;
+        }
       }
       
       // Try to get the form context from the current form
       if (xrm.getCurrentForm) {
-        const formContext = xrm.getCurrentForm();
-        if (formContext && formContext.getAttribute) {
-          return formContext;
+        try {
+          const formContext = xrm.getCurrentForm();
+          if (formContext) {
+            logToExtension("INFO", "Got form context via xrm.getCurrentForm()");
+            return formContext;
+          }
+        } catch (e) {
+          logToExtension("DEBUG", `Error using getCurrentForm: ${e.message}`);
         }
+      }
+      
+      // Try version-specific APIs
+      if (xrm.FormContext) {
+        logToExtension("INFO", "Got form context via xrm.FormContext");
+        return xrm.FormContext;
+      }
+      
+      // Check for form global variable as a last resort
+      if (typeof form !== 'undefined' && form.context) {
+        logToExtension("INFO", "Got form context via global form.context");
+        return form.context;
       }
       
       logToExtension("WARNING", "Found Xrm object but could not get form context");
       return null;
     } catch (e) {
       logToExtension("ERROR", `Error getting Dynamics CRM form context: ${e.message}`);
+      return null;
+    }
+  },
+  
+  // Advanced Xrm object finder - integrated from our Level Up script
+  findXrm() {
+    try {
+      // Method 1: Check window
+      if (typeof window.Xrm !== 'undefined') {
+        logToExtension("INFO", "Found Xrm in window");
+        return window.Xrm;
+      }
+      
+      // Method 2: Try parent window
+      try {
+        if (window.parent && typeof window.parent.Xrm !== 'undefined') {
+          logToExtension("INFO", "Found Xrm in parent window");
+          return window.parent.Xrm;
+        }
+      } catch (e) {
+        // Cross-origin error
+      }
+
+      // Method 3: Look in common frame names
+      const frameNames = [
+        'contentIFrame0',
+        'contentIFrame1',
+        'contentIFrame2',
+        'contentIFrame3',
+        'areaContentIFrame',
+        'NavBarGloablQuickCreate',
+        'globalQuickCreate_frame',
+        'InlineDialog_Iframe',
+        'dialogFrm',
+        'formContentFrame'
+      ];
+      
+      for (const frameName of frameNames) {
+        try {
+          // Try by frame name in parent
+          if (window.parent && window.parent.frames && window.parent.frames[frameName] && 
+              typeof window.parent.frames[frameName].Xrm !== 'undefined') {
+            logToExtension("INFO", `Found Xrm in parent.frames.${frameName}`);
+            return window.parent.frames[frameName].Xrm;
+          }
+        } catch (e) {
+          // Cross-origin error
+        }
+        
+        try {
+          // Try by element ID
+          const frameElement = document.getElementById(frameName);
+          if (frameElement && frameElement.contentWindow && 
+              typeof frameElement.contentWindow.Xrm !== 'undefined') {
+            logToExtension("INFO", `Found Xrm in document.getElementById(${frameName}).contentWindow`);
+            return frameElement.contentWindow.Xrm;
+          }
+        } catch (e) {
+          // Error accessing frameElement
+        }
+      }
+      
+      // Method 4: Traverse all frames recursively (limited depth for performance)
+      try {
+        // Define recursive frame traversal function (with depth limit)
+        const findXrmInFrames = (win, depth = 0) => {
+          if (depth > 3) return null; // Limit recursion depth
+          
+          try {
+            if (typeof win.Xrm !== 'undefined') {
+              logToExtension("INFO", "Found Xrm in a nested frame");
+              return win.Xrm;
+            }
+            
+            // Check each frame in this window
+            if (win.frames && win.frames.length > 0) {
+              for (let i = 0; i < win.frames.length; i++) {
+                try {
+                  const frameXrm = findXrmInFrames(win.frames[i], depth + 1);
+                  if (frameXrm) return frameXrm;
+                } catch (frameError) {
+                  // Cross-origin error, continue to next frame
+                }
+              }
+            }
+          } catch (traverseError) {
+            // Ignore cross-origin errors
+          }
+          return null;
+        };
+        
+        // Start traversal from top window
+        const topXrm = findXrmInFrames(window.top);
+        if (topXrm) return topXrm;
+      } catch (e) {
+        logToExtension("DEBUG", `Error in recursive frame traversal: ${e.message}`);
+      }
+      
+      // Method 5: Check for global variables with Page properties (could be Xrm)
+      try {
+        for (const key in window) {
+          try {
+            if (window[key] && 
+                typeof window[key] === 'object' && 
+                window[key].Page && 
+                typeof window[key].Page === 'object') {
+              logToExtension("INFO", `Found potential Xrm object in global variable: ${key}`);
+              return window[key];
+            }
+          } catch (propError) {
+            // Skip inaccessible properties
+          }
+        }
+      } catch (e) {
+        logToExtension("DEBUG", `Error in global variables search: ${e.message}`);
+      }
+      
+      logToExtension("WARNING", "Could not find Xrm in any frame or global object");
+      return null;
+    } catch (e) {
+      logToExtension("ERROR", `Error finding Xrm: ${e.message}`);
       return null;
     }
   },
@@ -874,45 +1012,89 @@ function injectCrmScript() {
         return;
       }
       
-      // First try the chrome.scripting API (requires scripting permission)
+      // Determine if this might be a CRM page - safer script injection
+      const isCrmDetected = Array.from(document.scripts).some(
+        (script) =>
+          script.src.indexOf('/uclient/scripts') !== -1 ||
+          script.src.indexOf('/_static/_common/scripts/PageLoader.js') !== -1 ||
+          script.src.indexOf('/_static/_common/scripts/crminternalutility.js') !== -1
+      ) || hostname.includes('dynamics.com');
+      
+      if (!isCrmDetected) {
+        console.log("Not detected as a CRM page, skipping script injection");
+        logToExtension("INFO", "Not detected as a CRM page, skipping script injection");
+        resolve();
+        return;
+      }
+      
+      logToExtension("INFO", "Detected potential CRM page, injecting scripts");
+      
+      // Set of scripts to inject
+      const scriptsToInject = [
+        { url: 'crm-injector.js', name: 'Primary CRM injector' },
+        { url: 'scripts/levelup.extension.js', name: 'Level Up extension script' },
+        { url: 'scripts/common.utility.js', name: 'CRM utility functions' }
+      ];
+      
+      // Try chrome.scripting API first (Manifest V3 approach)
       try {
         if (chrome.scripting) {
-          chrome.scripting.executeScript({
-            target: { tabId: -1, allFrames: true }, // -1 means current tab
-            func: injectScriptTag,
-            args: [chrome.runtime.getURL('crm-injector.js')]
-          }).then(() => {
-            window.injectedCrmScript = true;
-            try {
-              logToExtension("INFO", "Script injected using chrome.scripting API");
-            } catch (logError) {
-              console.log("Logging error after injection:", logError.message);
+          // Execute our scripts in sequence
+          const injectAllScripts = async () => {
+            for (const script of scriptsToInject) {
+              try {
+                await chrome.scripting.executeScript({
+                  target: { tabId: -1, allFrames: true }, // -1 means current tab
+                  func: injectScriptTag,
+                  args: [chrome.runtime.getURL(script.url)]
+                });
+                logToExtension("INFO", `${script.name} injected using chrome.scripting API`);
+              } catch (scriptError) {
+                logToExtension("WARNING", `Failed to inject ${script.name}: ${scriptError.message}`);
+                // Fall back to direct script tag injection for this script
+                injectScriptTag(chrome.runtime.getURL(script.url));
+              }
             }
-            resolve();
-          }).catch(error => {
-            console.log("Failed to inject script using chrome.scripting API:", error.message);
-            try {
-              logToExtension("WARNING", "Failed to inject script using chrome.scripting API: " + error.message);
-            } catch (logError) {
-              // Ignore logging errors
-            }
-            // Fall back to script tag method
-            injectScriptTag(chrome.runtime.getURL('crm-injector.js'));
-            window.injectedCrmScript = true;
-            resolve();
-          });
+          };
+          
+          injectAllScripts()
+            .then(() => {
+              window.injectedCrmScript = true;
+              logToExtension("INFO", "All scripts injected successfully");
+              resolve();
+            })
+            .catch(error => {
+              logToExtension("ERROR", `Script injection sequence failed: ${error.message}`);
+              
+              // Fall back to direct script tag method for all scripts
+              for (const script of scriptsToInject) {
+                injectScriptTag(chrome.runtime.getURL(script.url));
+              }
+              
+              window.injectedCrmScript = true;
+              resolve();
+            });
         } else {
-          // Fallback method using a script tag
-          injectScriptTag(chrome.runtime.getURL('crm-injector.js'));
+          // Fallback for Manifest V2 or when chrome.scripting is unavailable
+          logToExtension("INFO", "chrome.scripting API not available, using fallback injection");
+          
+          for (const script of scriptsToInject) {
+            injectScriptTag(chrome.runtime.getURL(script.url));
+            logToExtension("INFO", `${script.name} injected using script tag method`);
+          }
+          
           window.injectedCrmScript = true;
           resolve();
         }
       } catch (runtimeError) {
         console.error("Runtime error during injection:", runtimeError.message);
+        logToExtension("ERROR", `Runtime error during injection: ${runtimeError.message}`);
+        
         // If we get here, it's likely a context invalidation, so reject
         reject(new Error("Extension context error: " + runtimeError.message));
       }
     } catch (e) {
+      console.error("Fatal error in injectCrmScript:", e);
       reject(e);
     }
   });
