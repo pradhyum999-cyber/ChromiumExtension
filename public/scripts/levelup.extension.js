@@ -529,11 +529,44 @@
      * Send response back to extension
      */
     sendResponse: function(command, data) {
-      window.postMessage({
-        type: 'CRM_EXTENSION_RESPONSE',
-        command: command,
-        ...data
-      }, '*');
+      console.log(`Level Up sending response for ${command}:`, data);
+      
+      // Method 1: Use window.postMessage
+      try {
+        window.postMessage({
+          type: 'CRM_EXTENSION_RESPONSE',
+          command: command,
+          ...data
+        }, '*');
+      } catch (e) {
+        console.error('Error sending response via postMessage:', e);
+      }
+      
+      // Method 2: Use custom event as backup (similar to notifyExtension)
+      try {
+        const responseEvent = new CustomEvent('crm_extension_response', {
+          detail: {
+            type: 'CRM_EXTENSION_RESPONSE',
+            command: command,
+            ...data
+          }
+        });
+        document.dispatchEvent(responseEvent);
+      } catch (e) {
+        console.error('Error sending response via custom event:', e);
+      }
+      
+      // Method 3: Set a global variable that can be checked
+      try {
+        window._CRM_EXTENSION_LAST_RESPONSE = {
+          type: 'CRM_EXTENSION_RESPONSE',
+          command: command,
+          timestamp: new Date().getTime(),
+          ...data
+        };
+      } catch (e) {
+        console.error('Error setting global response variable:', e);
+      }
     },
     
     /**

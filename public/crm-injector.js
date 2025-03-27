@@ -3,7 +3,24 @@
  * and can access the Xrm object in Dynamics CRM
  */
 
-// Global namespace for our extension
+// Make our CrmExtension globally accessible so content script can find it
+window.exportToExtension = function(obj) {
+  window._CRM_EXTENSION_EXPORTED_OBJECTS = window._CRM_EXTENSION_EXPORTED_OBJECTS || {};
+  for (var key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      window._CRM_EXTENSION_EXPORTED_OBJECTS[key] = obj[key];
+    }
+  }
+  
+  // Also set directly on window for easier access
+  for (var key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      window[key] = obj[key];
+    }
+  }
+};
+
+// Global namespace for our extension with enhanced communication and debugging
 window.CrmDataInjector = {
   // Utility to log messages that can be seen in the extension popup
   log: function(level, message) {
@@ -399,3 +416,148 @@ window.CrmDataInjector = {
 
 // Initialize when the script loads
 CrmDataInjector.initialize();
+
+// Export our injector to make it accessible to content scripts
+try {
+  // Create a global version for the content script to access
+  window.CrmExtension = {
+    testConnection: function() {
+      try {
+        var formContext = CrmDataInjector.getFormContext();
+        console.log("CrmExtension.testConnection called, formContext:", !!formContext);
+        
+        // Get more detailed information to help debug
+        var pageInfo = {};
+        try {
+          // Try to gather useful diagnostic info
+          pageInfo.url = window.location.href;
+          pageInfo.title = document.title;
+          pageInfo.hostname = window.location.hostname;
+          pageInfo.protocol = window.location.protocol;
+          pageInfo.iframes = document.getElementsByTagName('iframe').length;
+          pageInfo.scripts = Array.from(document.scripts)
+            .map(s => s.src)
+            .filter(s => s.includes('/uclient/') || s.includes('/_static/') || s.includes('crm'))
+            .slice(0, 5); // Just get first 5 to avoid huge objects
+          
+          if (typeof Xrm !== 'undefined') {
+            pageInfo.hasXrm = true;
+            try {
+              pageInfo.xrmVersion = Xrm.Page && Xrm.Page.context ? Xrm.Page.context.getVersion() : 'unknown';
+            } catch (e) {
+              pageInfo.xrmVersionError = e.message;
+            }
+          }
+          
+          if (formContext) {
+            try {
+              pageInfo.entityName = formContext.data.entity.getEntityName();
+            } catch (e) { pageInfo.entityNameError = e.message; }
+            
+            try {
+              pageInfo.formType = formContext.ui ? formContext.ui.getFormType() : 'Unknown';
+            } catch (e) { pageInfo.formTypeError = e.message; }
+            
+            try {
+              pageInfo.recordId = formContext.data.entity.getId ? formContext.data.entity.getId() : null;
+            } catch (e) { pageInfo.recordIdError = e.message; }
+          }
+        } catch (infoError) {
+          pageInfo.error = infoError.message;
+        }
+        
+        // Send using multiple communication channels
+        console.log("CrmExtension sending TEST_CONNECTION response with multiple channels");
+        
+        // Method 1: window.postMessage
+        try {
+          window.postMessage({
+            type: 'CRM_EXTENSION_RESPONSE',
+            command: 'TEST_CONNECTION',
+            success: !!formContext,
+            method: 'CrmExtension_direct',
+            xrmFound: typeof Xrm !== 'undefined',
+            formContextFound: !!formContext,
+            pageInfo: pageInfo
+          }, '*');
+        } catch (e) {
+          console.error("Error sending postMessage response:", e);
+        }
+        
+        // Method 2: Custom event
+        try {
+          const responseEvent = new CustomEvent('crm_extension_response', {
+            detail: {
+              type: 'CRM_EXTENSION_RESPONSE',
+              command: 'TEST_CONNECTION',
+              success: !!formContext,
+              method: 'CrmExtension_event',
+              xrmFound: typeof Xrm !== 'undefined',
+              formContextFound: !!formContext,
+              pageInfo: pageInfo
+            }
+          });
+          document.dispatchEvent(responseEvent);
+        } catch (e) {
+          console.error("Error dispatching custom event:", e);
+        }
+        
+        // Method 3: Global variable as backup
+        try {
+          window._CRM_EXTENSION_LAST_RESPONSE = {
+            type: 'CRM_EXTENSION_RESPONSE',
+            command: 'TEST_CONNECTION',
+            timestamp: new Date().getTime(),
+            success: !!formContext,
+            method: 'CrmExtension_global',
+            xrmFound: typeof Xrm !== 'undefined',
+            formContextFound: !!formContext,
+            pageInfo: pageInfo
+          };
+        } catch (e) {
+          console.error("Error setting global response variable:", e);
+        }
+        
+        return !!formContext;
+      } catch (e) {
+        console.error("Error in CrmExtension.testConnection:", e);
+        
+        // Still try to send a response even if we failed
+        try {
+          window.postMessage({
+            type: 'CRM_EXTENSION_RESPONSE',
+            command: 'TEST_CONNECTION',
+            success: false,
+            error: e.message
+          }, '*');
+        } catch (postError) {
+          console.error("Failed to send error response:", postError);
+        }
+        
+        return false;
+      }
+    },
+    
+    getFields: function() {
+      return CrmDataInjector.getFormFields();
+    },
+    
+    fillFields: function(fieldValues) {
+      return CrmDataInjector.fillFormFields(fieldValues);
+    },
+    
+    getContext: function() {
+      return CrmDataInjector.getFormContext();
+    }
+  };
+  
+  // Export it for easier access
+  exportToExtension({
+    CrmExtension: window.CrmExtension,
+    CrmDataInjector: window.CrmDataInjector
+  });
+  
+  console.log("CrmExtension successfully exported to window");
+} catch (e) {
+  console.error("Error exporting CrmExtension:", e);
+}

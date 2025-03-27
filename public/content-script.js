@@ -730,25 +730,90 @@ async function initContentScript() {
         // Try to communicate with our injected script
         injectCrmScript()
           .then(() => {
-            // Send a message to our injected script
-            window.postMessage({
-              type: 'CRM_EXTENSION_COMMAND',
-              command: 'TEST_CONNECTION'
-            }, '*');
+            console.log("CRM script injected for TEST_CONNECTION, sending command");
             
-            // Listen for response
-            listenForScriptResponse('TEST_CONNECTION', 3000)
+            // Log more diagnostic info about the page
+            const pageInfo = {
+              url: window.location.href,
+              hostname: window.location.hostname,
+              title: document.title,
+              iframes: document.getElementsByTagName('iframe').length,
+              hasXrmGlobal: typeof Xrm !== 'undefined',
+              hasParentXrm: window.parent && typeof window.parent.Xrm !== 'undefined',
+              hasCrmScripts: Array.from(document.scripts).some(s => 
+                s.src.indexOf('/uclient/scripts') !== -1 || 
+                s.src.indexOf('/_static/_common/scripts/PageLoader.js') !== -1
+              )
+            };
+            
+            logToExtension("INFO", "TEST_CONNECTION page diagnostics: " + JSON.stringify(pageInfo));
+            
+            // Try both methods of sending the command - postMessage and direct call
+            try {
+              // Method 1: Send via postMessage
+              window.postMessage({
+                type: 'CRM_EXTENSION_COMMAND',
+                command: 'TEST_CONNECTION'
+              }, '*');
+              
+              // Method 2: Try to access our injected CrmExtension directly
+              if (window.CrmExtension && typeof window.CrmExtension.testConnection === 'function') {
+                console.log("Found global CrmExtension, calling testConnection directly");
+                window.CrmExtension.testConnection();
+              }
+            } catch (e) {
+              console.error("Error sending TEST_CONNECTION command:", e);
+            }
+            
+            // Listen for response with a longer timeout (8 seconds)
+            listenForScriptResponse('TEST_CONNECTION', 8000)
               .then((response) => {
                 console.log("Got TEST_CONNECTION response from injected script:", response);
                 sendResponse(response);
               })
               .catch((error) => {
                 console.error("TEST_CONNECTION response error:", error);
+                
+                // Last resort - if we have a findXrm function, try direct detection
+                try {
+                  const xrm = dynamicsCRM.findXrm();
+                  if (xrm) {
+                    // Create a minimal success response
+                    console.log("Found Xrm via direct detection after timeout");
+                    sendResponse({ 
+                      success: true, 
+                      error: "Used fallback detection: " + error.message,
+                      method: "direct_fallback",
+                      xrmFound: true
+                    });
+                    return;
+                  }
+                } catch (directError) {
+                  console.error("Error in direct Xrm detection fallback:", directError);
+                }
+                
                 sendResponse({ success: false, error: error.message });
               });
           })
           .catch((error) => {
             console.error("Failed to inject script for TEST_CONNECTION:", error);
+            
+            // Try direct detection as a last resort
+            try {
+              const xrm = dynamicsCRM.findXrm();
+              if (xrm) {
+                console.log("Found Xrm via direct detection after injection failure");
+                sendResponse({ 
+                  success: true, 
+                  method: "direct_after_injection_failure",
+                  error: "Injection failed but Xrm found: " + error.message
+                });
+                return;
+              }
+            } catch (e) {
+              console.error("Error in fallback Xrm detection:", e);
+            }
+            
             sendResponse({ success: false, error: error.message });
           });
           
@@ -1111,24 +1176,127 @@ function injectScriptTag(scriptUrl) {
 }
 
 // Helper to listen for a response from our injected script
-function listenForScriptResponse(command, timeoutMs) {
+function listenForScriptResponse(command, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      window.removeEventListener('message', responseHandler);
-      reject(new Error('Timeout waiting for response'));
-    }, timeoutMs);
+    // Track if we've already resolved/rejected to avoid multiple triggers
+    let isHandled = false;
     
-    function responseHandler(event) {
-      if (event.data && 
-          event.data.type === 'CRM_EXTENSION_RESPONSE' && 
-          event.data.command === command) {
-        clearTimeout(timeout);
-        window.removeEventListener('message', responseHandler);
-        resolve(event.data);
+    // Track event listeners so we can clean them up
+    const cleanupListeners = () => {
+      window.removeEventListener('message', messageHandler);
+      document.removeEventListener('crm_extension_response', customEventHandler);
+      clearInterval(pollingInterval);
+      clearTimeout(timeout);
+    };
+    
+    // Resolve the promise if not already resolved/rejected
+    const handleResponse = (response) => {
+      if (!isHandled) {
+        isHandled = true;
+        cleanupListeners();
+        resolve(response);
+      }
+    };
+    
+    // Reject the promise if not already resolved/rejected
+    const handleError = (error) => {
+      if (!isHandled) {
+        isHandled = true;
+        cleanupListeners();
+        reject(error);
+      }
+    };
+    
+    // Method 1: Listen for window.postMessage events
+    function messageHandler(event) {
+      try {
+        if (event.data && 
+            event.data.type === 'CRM_EXTENSION_RESPONSE' && 
+            event.data.command === command) {
+          console.log(`Received ${command} response via postMessage:`, event.data);
+          handleResponse(event.data);
+        }
+      } catch (e) {
+        console.error('Error in message handler:', e);
       }
     }
     
-    window.addEventListener('message', responseHandler);
+    // Method 2: Listen for custom events
+    function customEventHandler(event) {
+      try {
+        if (event.detail && 
+            event.detail.type === 'CRM_EXTENSION_RESPONSE' && 
+            event.detail.command === command) {
+          console.log(`Received ${command} response via custom event:`, event.detail);
+          handleResponse(event.detail);
+        }
+      } catch (e) {
+        console.error('Error in custom event handler:', e);
+      }
+    }
+    
+    // Method 3: Poll for global variable response
+    const pollingInterval = setInterval(() => {
+      try {
+        // Check if we have a recent response in the global variable
+        if (window._CRM_EXTENSION_LAST_RESPONSE && 
+            window._CRM_EXTENSION_LAST_RESPONSE.type === 'CRM_EXTENSION_RESPONSE' &&
+            window._CRM_EXTENSION_LAST_RESPONSE.command === command) {
+          
+          // Make sure it's a recent response (within last 10 seconds)
+          const responseAge = new Date().getTime() - window._CRM_EXTENSION_LAST_RESPONSE.timestamp;
+          if (responseAge < 10000) {
+            console.log(`Received ${command} response via global variable:`, window._CRM_EXTENSION_LAST_RESPONSE);
+            handleResponse(window._CRM_EXTENSION_LAST_RESPONSE);
+          }
+        }
+      } catch (e) {
+        console.error('Error in polling for global response:', e);
+      }
+    }, 100); // Poll every 100ms
+    
+    // Set a timeout to reject the promise if no response is received
+    const timeout = setTimeout(() => {
+      console.warn(`Timeout waiting for ${command} response after ${timeoutMs}ms`);
+      
+      // Check one last time for direct Xrm access as a fallback
+      if (command === 'TEST_CONNECTION') {
+        try {
+          // Direct Xrm check as a last resort
+          logToExtension("INFO", "Trying direct Xrm detection as timeout fallback");
+          
+          // Try to find Xrm using our advanced method
+          const xrm = dynamicsCRM.findXrm();
+          if (xrm) {
+            console.log("Found Xrm directly during timeout fallback");
+            
+            // We have Xrm, create a minimal response
+            const response = {
+              type: 'CRM_EXTENSION_RESPONSE',
+              command: 'TEST_CONNECTION',
+              success: true,
+              fallback: true,
+              message: 'Found Xrm object directly after timeout',
+              xrmFound: true
+            };
+            
+            handleResponse(response);
+            return;
+          }
+        } catch (e) {
+          console.error("Error in timeout fallback Xrm detection:", e);
+        }
+      }
+      
+      handleError(new Error('Timeout waiting for response'));
+    }, timeoutMs);
+    
+    // Set up all the event listeners
+    window.addEventListener('message', messageHandler);
+    document.addEventListener('crm_extension_response', customEventHandler);
+    
+    // Log that we're listening
+    console.log(`Listening for ${command} response with ${timeoutMs}ms timeout`);
   });
 }
 
@@ -1153,6 +1321,86 @@ document.addEventListener('levelup', function(event) {
     console.error('Error processing levelup event:', e);
   }
 });
+
+// Manual test function for Dynamics CRM connectivity
+// This can be called from the browser console or from popup.js
+window.testDynamicsCrmConnection = function() {
+  console.log("Manual test for Dynamics CRM connectivity started");
+  
+  // Log page information
+  const pageInfo = {
+    url: window.location.href,
+    hostname: window.location.hostname,
+    title: document.title,
+    iframes: document.getElementsByTagName('iframe').length,
+    scripts: Array.from(document.scripts)
+      .map(s => s.src)
+      .filter(s => s.includes('crm') || s.includes('dynamics') || s.includes('xrm'))
+      .slice(0, 10)
+  };
+  
+  console.log("Page information:", pageInfo);
+  
+  // Test direct Xrm access in this frame
+  if (typeof Xrm !== 'undefined') {
+    console.log("Xrm found directly in content script context", Xrm);
+  } else {
+    console.log("No direct Xrm access in content script context");
+  }
+  
+  // Try to find Xrm in frames
+  try {
+    const xrm = dynamicsCRM.findXrm();
+    console.log("findXrm() result:", xrm ? "Found" : "Not found");
+  } catch (e) {
+    console.error("Error in findXrm():", e);
+  }
+  
+  // Try to get form context
+  try {
+    const formContext = dynamicsCRM.getFormContext();
+    console.log("getFormContext() result:", formContext ? "Found" : "Not found");
+    if (formContext) {
+      console.log("Form context details:", {
+        hasData: !!formContext.data,
+        hasEntity: !!(formContext.data && formContext.data.entity),
+        hasAttributes: !!(formContext.data && formContext.data.entity && formContext.data.entity.attributes),
+        entityName: formContext.data && formContext.data.entity && typeof formContext.data.entity.getEntityName === 'function' 
+          ? formContext.data.entity.getEntityName() 
+          : null
+      });
+    }
+  } catch (e) {
+    console.error("Error getting form context:", e);
+  }
+  
+  // Try injected script approach
+  console.log("Testing injected script approach...");
+  injectCrmScript()
+    .then(() => {
+      console.log("Script injection successful");
+      
+      // Send test command
+      window.postMessage({
+        type: 'CRM_EXTENSION_COMMAND',
+        command: 'TEST_CONNECTION'
+      }, '*');
+      
+      // Listen for response
+      listenForScriptResponse('TEST_CONNECTION', 5000)
+        .then(response => {
+          console.log("Injection test successful:", response);
+        })
+        .catch(error => {
+          console.error("Injection test failed:", error);
+        });
+    })
+    .catch(error => {
+      console.error("Script injection failed:", error);
+    });
+    
+  return "Test running in background, check console for results...";
+};
 
 // Run the content script initialization
 initContentScript();

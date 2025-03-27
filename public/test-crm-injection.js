@@ -1,5 +1,199 @@
-// Dynamics CRM Form Auto-Fill Extension
-console.log('Dynamics CRM Form Auto-Fill Extension Loaded');
+// Dynamics CRM Form Auto-Fill Extension - Advanced Version with Diagnostics
+console.log('Enhanced Dynamics CRM Form Auto-Fill Extension Loaded');
+
+// Diagnostic logging
+window.testDiagnostics = {
+  startTime: new Date().getTime(),
+  logs: [],
+  environments: {},
+  
+  log: function(level, message) {
+    const timestamp = new Date().toISOString();
+    console.log(`[${level}] ${timestamp}: ${message}`);
+    this.logs.push({ level, timestamp, message });
+    
+    // Send to extension if available
+    try {
+      if (window.parent && window.parent.postMessage) {
+        window.parent.postMessage({
+          type: 'CRM_EXTENSION_LOG',
+          data: { level, message, timestamp }
+        }, '*');
+      }
+    } catch (e) {
+      console.error('Error sending log to extension:', e);
+    }
+  },
+  
+  detectEnvironment: function() {
+    // Collect environment information
+    try {
+      this.environments.url = window.location.href;
+      this.environments.hostname = window.location.hostname;
+      this.environments.path = window.location.pathname;
+      this.environments.title = document.title;
+      this.environments.hasFrames = window.frames.length > 0;
+      this.environments.frameCount = window.frames.length;
+      this.environments.hasIFrames = document.getElementsByTagName('iframe').length > 0;
+      this.environments.iframeCount = document.getElementsByTagName('iframe').length;
+      this.environments.scripts = Array.from(document.scripts).map(s => s.src).filter(s => s.length > 0).slice(0, 10);
+      this.environments.hasCrmScripts = Array.from(document.scripts).some(s => 
+        s.src.indexOf('/uclient/scripts') !== -1 || 
+        s.src.indexOf('/_static/_common/scripts/PageLoader.js') !== -1
+      );
+      
+      // Check for Xrm in this window
+      this.environments.hasXrm = typeof Xrm !== 'undefined';
+      if (this.environments.hasXrm && Xrm && Xrm.Page) {
+        this.environments.hasXrmPage = true;
+        if (Xrm.Page.data && Xrm.Page.data.entity) {
+          this.environments.hasXrmEntity = true;
+          try { 
+            this.environments.entityName = Xrm.Page.data.entity.getEntityName();
+          } catch(e) {}
+        }
+      }
+      
+      // Log the environment info
+      this.log('INFO', 'Environment detected: ' + JSON.stringify(this.environments));
+    } catch (e) {
+      this.log('ERROR', 'Error detecting environment: ' + e.message);
+    }
+  },
+  
+  testCrmAccessibility: function() {
+    try {
+      // Create comprehensive diagnostics for Xrm access
+      const diagnostics = {};
+      
+      // Test 1: Check global Xrm
+      try {
+        diagnostics.hasXrm = typeof Xrm !== 'undefined';
+        if (diagnostics.hasXrm) {
+          this.log('INFO', 'Found global Xrm object');
+          
+          // Check version
+          try {
+            diagnostics.xrmVersion = Xrm.Page && Xrm.Page.context ? 
+                                     Xrm.Page.context.getVersion() : 'Unknown';
+            this.log('INFO', `Xrm version: ${diagnostics.xrmVersion}`);
+          } catch (e) {
+            diagnostics.versionError = e.message;
+          }
+          
+          // Check basic structure
+          diagnostics.hasXrmPage = typeof Xrm.Page !== 'undefined';
+          
+          if (diagnostics.hasXrmPage) {
+            diagnostics.hasData = typeof Xrm.Page.data !== 'undefined';
+            diagnostics.hasEntity = diagnostics.hasData && typeof Xrm.Page.data.entity !== 'undefined';
+            diagnostics.hasUI = typeof Xrm.Page.ui !== 'undefined';
+            diagnostics.hasGetFormContext = typeof Xrm.Page.getFormContext === 'function';
+            
+            if (diagnostics.hasEntity) {
+              try {
+                diagnostics.entityName = Xrm.Page.data.entity.getEntityName();
+                this.log('INFO', `Entity name: ${diagnostics.entityName}`);
+              } catch (e) {
+                diagnostics.entityNameError = e.message;
+              }
+            }
+          }
+        } else {
+          this.log('INFO', 'No global Xrm object found, will try alternative detection methods');
+        }
+      } catch (e) {
+        diagnostics.xrmTestError = e.message;
+        this.log('ERROR', `Error testing global Xrm: ${e.message}`);
+      }
+      
+      // Test 2: Check for Xrm in parent frame
+      try {
+        if (window.parent && window.parent !== window) {
+          try {
+            diagnostics.hasParentXrm = typeof window.parent.Xrm !== 'undefined';
+            if (diagnostics.hasParentXrm) {
+              this.log('INFO', 'Found Xrm in parent frame');
+            }
+          } catch (e) {
+            diagnostics.parentXrmError = 'Cross-origin access denied';
+          }
+        }
+      } catch (e) {
+        diagnostics.parentFrameTestError = e.message;
+      }
+      
+      // Test 3: Check for form context 
+      try {
+        // Try multiple methods to get form context
+        let formContext = null;
+        
+        if (typeof Xrm !== 'undefined') {
+          // Method 1: Modern API
+          if (!formContext && Xrm.Page && Xrm.Page.getFormContext) {
+            try {
+              formContext = Xrm.Page.getFormContext();
+              if (formContext) {
+                diagnostics.formContextMethod = 'Xrm.Page.getFormContext';
+                this.log('INFO', 'Got form context via Xrm.Page.getFormContext()');
+              }
+            } catch (e) {
+              diagnostics.getFormContextError = e.message;
+            }
+          }
+          
+          // Method 2: Direct Xrm.Page
+          if (!formContext && Xrm.Page && Xrm.Page.data && Xrm.Page.data.entity) {
+            formContext = Xrm.Page;
+            diagnostics.formContextMethod = 'Xrm.Page';
+            this.log('INFO', 'Got form context via Xrm.Page');
+          }
+        }
+        
+        diagnostics.hasFormContext = !!formContext;
+        if (formContext) {
+          // Check form context capabilities
+          try {
+            diagnostics.canGetAttribute = typeof formContext.getAttribute === 'function';
+            if (diagnostics.canGetAttribute) {
+              const attrTest = formContext.getAttribute('name') || 
+                              formContext.getAttribute('fullname') || 
+                              formContext.getAttribute('accountnumber');
+              diagnostics.attributeTest = !!attrTest;
+            }
+          } catch (e) {
+            diagnostics.attributeTestError = e.message;
+          }
+          
+          try {
+            if (formContext.data && formContext.data.entity) {
+              diagnostics.canGetEntityName = typeof formContext.data.entity.getEntityName === 'function';
+              if (diagnostics.canGetEntityName) {
+                diagnostics.entityName = formContext.data.entity.getEntityName();
+              }
+            }
+          } catch (e) {
+            diagnostics.entityNameTestError = e.message;
+          }
+        } else {
+          this.log('WARNING', 'No form context found');
+        }
+      } catch (e) {
+        diagnostics.formContextTestError = e.message;
+        this.log('ERROR', `Error testing form context: ${e.message}`);
+      }
+      
+      // Summarize diagnostics
+      this.log('INFO', 'CRM diagnostics complete: ' + JSON.stringify(diagnostics));
+      this.diagnostics = diagnostics;
+      
+      return diagnostics;
+    } catch (e) {
+      this.log('ERROR', `Error in CRM diagnostics: ${e.message}`);
+      return { error: e.message };
+    }
+  }
+};
 
 // Sample data templates to inject into CRM forms
 const dataTemplates = {
@@ -261,13 +455,83 @@ function getSelectedTemplateName() {
   return selector.options[selector.selectedIndex].text;
 }
 
-// Initialize the extension interface
+// Initialize the extension interface and run diagnostics
 document.addEventListener('DOMContentLoaded', function() {
-  createExtensionInterface();
-  console.log('CRM Auto-Fill Interface Ready');
+  try {
+    // Run diagnostics first
+    window.testDiagnostics.log('INFO', 'Starting CRM extension diagnostics on DOMContentLoaded');
+    window.testDiagnostics.detectEnvironment();
+    window.testDiagnostics.testCrmAccessibility();
+    
+    // Try to create UI if appropriate
+    createExtensionInterface();
+    console.log('CRM Auto-Fill Interface Ready');
+    
+    // Send diagnostic info to parent if possible
+    try {
+      window.parent.postMessage({
+        type: 'CRM_DIAGNOSTICS_RESULTS',
+        data: {
+          environments: window.testDiagnostics.environments,
+          diagnostics: window.testDiagnostics.diagnostics,
+          logs: window.testDiagnostics.logs
+        }
+      }, '*');
+    } catch (e) {
+      console.error('Error sending diagnostics to parent:', e);
+    }
+  } catch (e) {
+    console.error('Error in CRM extension initialization:', e);
+  }
 });
 
 // Initialize immediately if document already loaded
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  setTimeout(createExtensionInterface, 0);
+  setTimeout(function() {
+    try {
+      // Run diagnostics first
+      window.testDiagnostics.log('INFO', 'Starting CRM extension diagnostics (immediate)');
+      window.testDiagnostics.detectEnvironment();
+      window.testDiagnostics.testCrmAccessibility();
+      
+      // Try to create UI if appropriate
+      createExtensionInterface();
+      
+      // Send diagnostic info to parent if possible
+      try {
+        window.parent.postMessage({
+          type: 'CRM_DIAGNOSTICS_RESULTS',
+          data: {
+            environments: window.testDiagnostics.environments,
+            diagnostics: window.testDiagnostics.diagnostics,
+            logs: window.testDiagnostics.logs
+          }
+        }, '*');
+      } catch (e) {
+        console.error('Error sending diagnostics to parent:', e);
+      }
+    } catch (e) {
+      console.error('Error in immediate CRM extension initialization:', e);
+    }
+  }, 0);
 }
+
+// Also add a global variable to make it easier to check if our script loaded
+window.CRM_EXTENSION_LOADED = true;
+window.CRM_EXTENSION_VERSION = '1.2.1';
+
+// Add global diagnostics functions to make debugging easier
+window.runCrmDiagnostics = function() {
+  try {
+    window.testDiagnostics.log('INFO', 'Running on-demand CRM diagnostics');
+    const results = window.testDiagnostics.testCrmAccessibility();
+    return {
+      environments: window.testDiagnostics.environments,
+      diagnostics: results,
+      logs: window.testDiagnostics.logs
+    };
+  } catch (e) {
+    console.error('Error running on-demand diagnostics:', e);
+    return { error: e.message };
+  }
+};
