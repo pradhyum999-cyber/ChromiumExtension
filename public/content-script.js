@@ -14,21 +14,82 @@ function logToExtension(level, message) {
 const dynamicsCRM = {
   // Check if current page is Dynamics CRM
   isDynamicsCRM() {
-    return window.location.hostname.includes('dynamics.com') && 
-           typeof Xrm !== 'undefined';
+    // Check for the hostname containing dynamics.com
+    const isDynamicsDomain = window.location.hostname.includes('dynamics.com');
+    
+    // Check for Xrm object in window or parent
+    const hasXrm = typeof Xrm !== 'undefined' || 
+                  (window.parent && typeof window.parent.Xrm !== 'undefined');
+    
+    // Check for common Dynamics CRM URL patterns
+    const hasCrmUrlPattern = window.location.href.includes('/main.aspx') || 
+                            window.location.href.includes('pagetype=entityrecord');
+    
+    return isDynamicsDomain && (hasXrm || hasCrmUrlPattern);
   },
   
   // Get form context if available
   getFormContext() {
-    if (typeof Xrm !== 'undefined') {
-      try {
-        return Xrm.Page || (Xrm.Page && Xrm.Page.getControl ? Xrm.Page : null);
-      } catch (e) {
-        logToExtension("ERROR", `Error getting Dynamics CRM form context: ${e.message}`);
+    try {
+      // Try different approaches to get Xrm
+      let xrm = null;
+      
+      // Check in window
+      if (typeof window.Xrm !== 'undefined') {
+        xrm = window.Xrm;
+      } 
+      // Check in parent window (iframe scenario)
+      else if (window.parent && typeof window.parent.Xrm !== 'undefined') {
+        xrm = window.parent.Xrm;
+      }
+      // Check for any global variable that might contain Xrm
+      else {
+        for (const key in window) {
+          if (window[key] && typeof window[key].Page !== 'undefined') {
+            xrm = window[key];
+            break;
+          }
+        }
+      }
+      
+      if (!xrm) {
+        logToExtension("WARNING", "Could not find Xrm object in page");
         return null;
       }
+      
+      // Modern Xrm API (Unified Interface)
+      if (xrm.Page && xrm.Page.getAttribute) {
+        return xrm.Page;
+      }
+      
+      // For Unified Interface, try to get the current form context
+      if (xrm.Form && xrm.Form.getAttribute) {
+        return xrm.Form;
+      }
+      
+      if (xrm.Page && xrm.Page.ui && xrm.Page.ui.getFormType) {
+        return xrm.Page;
+      }
+      
+      // Legacy approach 
+      if (xrm.Page && xrm.Page.getControl) {
+        return xrm.Page;
+      }
+      
+      // Try to get the form context from the current form
+      if (xrm.getCurrentForm) {
+        const formContext = xrm.getCurrentForm();
+        if (formContext && formContext.getAttribute) {
+          return formContext;
+        }
+      }
+      
+      logToExtension("WARNING", "Found Xrm object but could not get form context");
+      return null;
+    } catch (e) {
+      logToExtension("ERROR", `Error getting Dynamics CRM form context: ${e.message}`);
+      return null;
     }
-    return null;
   },
   
   // Get all available form fields

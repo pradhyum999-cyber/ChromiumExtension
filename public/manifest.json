@@ -36,7 +36,13 @@
         "*://*.crm2.dynamics.com/*",
         "*://*.crm3.dynamics.com/*",
         "*://*.crm4.dynamics.com/*",
-        "*://*.crm11.dynamics.com/*"
+        "*://*.crm5.dynamics.com/*",
+        "*://*.crm6.dynamics.com/*",
+        "*://*.crm7.dynamics.com/*",
+        "*://*.crm8.dynamics.com/*",
+        "*://*.crm9.dynamics.com/*",
+        "*://*.crm11.dynamics.com/*",
+        "*://*.crm12.dynamics.com/*"
       ],
       "js": ["content-script.js"],
       "run_at": "document_idle",
@@ -67,7 +73,13 @@
     "*://*.crm2.dynamics.com/*",
     "*://*.crm3.dynamics.com/*",
     "*://*.crm4.dynamics.com/*",
-    "*://*.crm11.dynamics.com/*"
+    "*://*.crm5.dynamics.com/*",
+    "*://*.crm6.dynamics.com/*",
+    "*://*.crm7.dynamics.com/*",
+    "*://*.crm8.dynamics.com/*",
+    "*://*.crm9.dynamics.com/*",
+    "*://*.crm11.dynamics.com/*",
+    "*://*.crm12.dynamics.com/*"
   ],
   "web_accessible_resources": [
     {
@@ -84,7 +96,13 @@
         "*://*.crm2.dynamics.com/*",
         "*://*.crm3.dynamics.com/*",
         "*://*.crm4.dynamics.com/*",
-        "*://*.crm11.dynamics.com/*"
+        "*://*.crm5.dynamics.com/*",
+        "*://*.crm6.dynamics.com/*",
+        "*://*.crm7.dynamics.com/*",
+        "*://*.crm8.dynamics.com/*",
+        "*://*.crm9.dynamics.com/*",
+        "*://*.crm11.dynamics.com/*",
+        "*://*.crm12.dynamics.com/*"
       ]
     }
   ],
