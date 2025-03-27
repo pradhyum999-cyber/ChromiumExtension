@@ -356,6 +356,149 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       }
       break;
+      
+    case "checkDynamicsCRM":
+      // Check if the active tab is a Dynamics CRM page
+      try {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs.length === 0) {
+            sendResponse({ success: false, error: "No active tab found" });
+            return;
+          }
+          
+          const activeTab = tabs[0];
+          // Send message to content script
+          chrome.tabs.sendMessage(activeTab.id, { action: "checkDynamicsCRM" }, (response) => {
+            if (chrome.runtime.lastError) {
+              logEvent("WARNING", `Failed to check if Dynamics CRM: ${chrome.runtime.lastError.message}`);
+              sendResponse({ success: false, error: chrome.runtime.lastError.message, isDynamicsCRM: false });
+            } else {
+              sendResponse({ success: true, ...response });
+            }
+          });
+        });
+      } catch (error) {
+        logEvent("ERROR", `Error checking Dynamics CRM: ${error.message}`);
+        sendResponse({ success: false, error: error.message, isDynamicsCRM: false });
+      }
+      break;
+      
+    case "getDynamicsCRMFields":
+      // Get form fields from Dynamics CRM page
+      try {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs.length === 0) {
+            sendResponse({ success: false, error: "No active tab found" });
+            return;
+          }
+          
+          const activeTab = tabs[0];
+          // Send message to content script
+          chrome.tabs.sendMessage(activeTab.id, { action: "getDynamicsCRMFields" }, (response) => {
+            if (chrome.runtime.lastError) {
+              logEvent("WARNING", `Failed to get Dynamics CRM fields: ${chrome.runtime.lastError.message}`);
+              sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              logEvent("INFO", `Retrieved ${response.fields ? response.fields.length : 0} Dynamics CRM fields`);
+              sendResponse({ success: true, ...response });
+            }
+          });
+        });
+      } catch (error) {
+        logEvent("ERROR", `Error getting Dynamics CRM fields: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      }
+      break;
+      
+    case "setDynamicsCRMField":
+      // Set a field value in Dynamics CRM
+      try {
+        if (!message.fieldName || message.value === undefined) {
+          sendResponse({ success: false, error: "Field name and value are required" });
+          return true;
+        }
+        
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs.length === 0) {
+            sendResponse({ success: false, error: "No active tab found" });
+            return;
+          }
+          
+          const activeTab = tabs[0];
+          // Send message to content script
+          chrome.tabs.sendMessage(activeTab.id, { 
+            action: "setDynamicsCRMField",
+            fieldName: message.fieldName,
+            value: message.value
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              logEvent("WARNING", `Failed to set Dynamics CRM field: ${chrome.runtime.lastError.message}`);
+              sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              if (response.success) {
+                logEvent("INFO", `Set Dynamics CRM field "${message.fieldName}" to "${message.value}"`);
+              } else {
+                logEvent("WARNING", `Failed to set Dynamics CRM field "${message.fieldName}"`);
+              }
+              sendResponse({ success: response.success, ...response });
+            }
+          });
+        });
+      } catch (error) {
+        logEvent("ERROR", `Error setting Dynamics CRM field: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      }
+      break;
+      
+    case "fillDynamicsCRMForm":
+      // Fill multiple fields in Dynamics CRM
+      try {
+        if (!message.values || typeof message.values !== 'object') {
+          sendResponse({ success: false, error: "Field values object is required" });
+          return true;
+        }
+        
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          if (tabs.length === 0) {
+            sendResponse({ success: false, error: "No active tab found" });
+            return;
+          }
+          
+          const activeTab = tabs[0];
+          // Send message to content script
+          chrome.tabs.sendMessage(activeTab.id, { 
+            action: "fillDynamicsCRMForm",
+            values: message.values
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              logEvent("WARNING", `Failed to fill Dynamics CRM form: ${chrome.runtime.lastError.message}`);
+              sendResponse({ success: false, error: chrome.runtime.lastError.message });
+            } else {
+              if (response.success) {
+                logEvent("INFO", `Filled ${response.filledCount} fields in Dynamics CRM form`);
+                // Show notification of success
+                try {
+                  chrome.notifications.create({
+                    type: 'basic',
+                    iconUrl: 'icons/icon48.png',
+                    title: 'Dynamics CRM Form Updated',
+                    message: `Successfully filled ${response.filledCount} fields in the form`
+                  });
+                } catch (e) {
+                  console.log("Could not show notification:", e);
+                }
+              } else {
+                logEvent("WARNING", `Failed to fill Dynamics CRM form`);
+              }
+              sendResponse({ success: response.success, ...response });
+            }
+          });
+        });
+      } catch (error) {
+        logEvent("ERROR", `Error filling Dynamics CRM form: ${error.message}`);
+        sendResponse({ success: false, error: error.message });
+      }
+      break;
   }
   
   // Required for async sendResponse

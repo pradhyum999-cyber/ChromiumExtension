@@ -311,6 +311,123 @@ export const executeScript = async (scriptFunction?: () => any): Promise<any> =>
   }
 };
 
+// Dynamics CRM Integration API
+export const dynamicsCRM = {
+  // Check if current page is a Dynamics CRM page with a form
+  checkCRMPage: async (): Promise<{isDynamicsCRM: boolean, hasForm: boolean}> => {
+    console.log('Checking if current page is Dynamics CRM');
+    
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      return new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          { action: "checkDynamicsCRM" },
+          (response) => {
+            if (chrome.runtime.lastError || !response || !response.success) {
+              resolve({ isDynamicsCRM: false, hasForm: false });
+            } else {
+              resolve({ 
+                isDynamicsCRM: response.isDynamicsCRM || false, 
+                hasForm: response.hasForm || false 
+              });
+            }
+          }
+        );
+      });
+    } else {
+      // Fallback for development environment
+      console.log('Not in extension environment, mocking CRM check');
+      return { isDynamicsCRM: false, hasForm: false };
+    }
+  },
+  
+  // Get all available fields from the CRM form
+  getFormFields: async (): Promise<any[]> => {
+    console.log('Getting Dynamics CRM form fields');
+    
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { action: "getDynamicsCRMFields" },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              reject(chrome.runtime.lastError);
+            } else if (response && response.success && response.fields) {
+              resolve(response.fields);
+            } else {
+              reject(response?.error || 'Failed to get CRM form fields');
+            }
+          }
+        );
+      });
+    } else {
+      // Fallback for development environment
+      console.log('Not in extension environment, mocking CRM fields');
+      return [];
+    }
+  },
+  
+  // Set a single field in the CRM form
+  setFieldValue: async (fieldName: string, value: any): Promise<boolean> => {
+    console.log(`Setting Dynamics CRM field ${fieldName} to ${value}`);
+    
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { 
+            action: "setDynamicsCRMField",
+            fieldName,
+            value 
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              reject(chrome.runtime.lastError);
+            } else if (response && response.success) {
+              resolve(true);
+            } else {
+              reject(response?.error || `Failed to set field ${fieldName}`);
+            }
+          }
+        );
+      });
+    } else {
+      // Fallback for development environment
+      console.log(`Mock setting CRM field ${fieldName} to ${value}`);
+      await browserAPI.logs.add("INFO", `Mock: Set CRM field ${fieldName} to ${value}`);
+      return true;
+    }
+  },
+  
+  // Fill multiple fields in the CRM form at once
+  fillForm: async (fieldValues: Record<string, any>): Promise<boolean> => {
+    console.log(`Filling Dynamics CRM form with ${Object.keys(fieldValues).length} fields`);
+    
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(
+          { 
+            action: "fillDynamicsCRMForm",
+            values: fieldValues
+          },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              reject(chrome.runtime.lastError);
+            } else if (response && response.success) {
+              resolve(true);
+            } else {
+              reject(response?.error || 'Failed to fill CRM form');
+            }
+          }
+        );
+      });
+    } else {
+      // Fallback for development environment
+      console.log(`Mock filling CRM form with fields: ${Object.keys(fieldValues).join(', ')}`);
+      await browserAPI.logs.add("INFO", `Mock: Filled ${Object.keys(fieldValues).length} CRM fields`);
+      return true;
+    }
+  }
+};
+
 // Initialize default data if not present
 export const initializeExtensionData = async () => {
   // Initialize features

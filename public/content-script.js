@@ -10,6 +10,108 @@ function logToExtension(level, message) {
   });
 }
 
+// Dynamics CRM specific functions
+const dynamicsCRM = {
+  // Check if current page is Dynamics CRM
+  isDynamicsCRM() {
+    return window.location.hostname.includes('dynamics.com') && 
+           typeof Xrm !== 'undefined';
+  },
+  
+  // Get form context if available
+  getFormContext() {
+    if (typeof Xrm !== 'undefined') {
+      try {
+        return Xrm.Page || (Xrm.Page && Xrm.Page.getControl ? Xrm.Page : null);
+      } catch (e) {
+        logToExtension("ERROR", `Error getting Dynamics CRM form context: ${e.message}`);
+        return null;
+      }
+    }
+    return null;
+  },
+  
+  // Get all available form fields
+  getFormFields() {
+    try {
+      const formContext = this.getFormContext();
+      if (!formContext || !formContext.getAttribute) {
+        return [];
+      }
+      
+      const attributes = formContext.getAttribute();
+      if (!attributes || !attributes.forEach) {
+        return [];
+      }
+      
+      const fields = [];
+      attributes.forEach(attribute => {
+        fields.push({
+          name: attribute.getName(),
+          type: attribute.getAttributeType(),
+          value: attribute.getValue(),
+          isDirty: attribute.getIsDirty(),
+          isRequired: attribute.getRequiredLevel() === 'required'
+        });
+      });
+      
+      return fields;
+    } catch (e) {
+      logToExtension("ERROR", `Error getting Dynamics CRM form fields: ${e.message}`);
+      return [];
+    }
+  },
+  
+  // Set a field value
+  setFieldValue(fieldName, value) {
+    try {
+      const formContext = this.getFormContext();
+      if (!formContext || !formContext.getAttribute) {
+        logToExtension("ERROR", "Form context not available");
+        return false;
+      }
+      
+      const attribute = formContext.getAttribute(fieldName);
+      if (!attribute) {
+        logToExtension("ERROR", `Field '${fieldName}' not found on form`);
+        return false;
+      }
+      
+      attribute.setValue(value);
+      logToExtension("INFO", `Set field '${fieldName}' to value: ${value}`);
+      return true;
+    } catch (e) {
+      logToExtension("ERROR", `Error setting field '${fieldName}': ${e.message}`);
+      return false;
+    }
+  },
+  
+  // Fill multiple fields at once
+  fillFormFields(fieldValues) {
+    if (!fieldValues || typeof fieldValues !== 'object') {
+      logToExtension("ERROR", "Invalid field values object");
+      return false;
+    }
+    
+    try {
+      let successCount = 0;
+      const totalFields = Object.keys(fieldValues).length;
+      
+      for (const [field, value] of Object.entries(fieldValues)) {
+        if (this.setFieldValue(field, value)) {
+          successCount++;
+        }
+      }
+      
+      logToExtension("INFO", `Successfully filled ${successCount}/${totalFields} fields on the form`);
+      return successCount > 0;
+    } catch (e) {
+      logToExtension("ERROR", `Error filling form fields: ${e.message}`);
+      return false;
+    }
+  }
+};
+
 // Check if the content script should be enabled on this domain
 function isContentScriptEnabled() {
   return new Promise((resolve) => {
@@ -106,6 +208,47 @@ async function initContentScript() {
           iframes: document.getElementsByTagName('iframe').length
         };
         sendResponse(metrics);
+      } else if (message.action === "checkDynamicsCRM") {
+        const isDynamicsCRM = dynamicsCRM.isDynamicsCRM();
+        sendResponse({ 
+          isDynamicsCRM: isDynamicsCRM,
+          hasForm: isDynamicsCRM && !!dynamicsCRM.getFormContext()
+        });
+      } else if (message.action === "getDynamicsCRMFields") {
+        if (!dynamicsCRM.isDynamicsCRM()) {
+          sendResponse({ success: false, error: "Not a Dynamics CRM page" });
+          return true;
+        }
+        
+        const fields = dynamicsCRM.getFormFields();
+        sendResponse({ 
+          success: true, 
+          fields: fields,
+          formName: document.title
+        });
+      } else if (message.action === "setDynamicsCRMField") {
+        if (!dynamicsCRM.isDynamicsCRM()) {
+          sendResponse({ success: false, error: "Not a Dynamics CRM page" });
+          return true;
+        }
+        
+        const success = dynamicsCRM.setFieldValue(message.fieldName, message.value);
+        sendResponse({ 
+          success: success, 
+          fieldName: message.fieldName,
+          value: message.value
+        });
+      } else if (message.action === "fillDynamicsCRMForm") {
+        if (!dynamicsCRM.isDynamicsCRM()) {
+          sendResponse({ success: false, error: "Not a Dynamics CRM page" });
+          return true;
+        }
+        
+        const success = dynamicsCRM.fillFormFields(message.values);
+        sendResponse({ 
+          success: success,
+          filledCount: Object.keys(message.values || {}).length
+        });
       }
       return true;
     });

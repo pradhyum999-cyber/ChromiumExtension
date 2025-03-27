@@ -29,11 +29,14 @@
         "*://*.example.org/*",
         "*://*.google.com/*",
         "*://*.microsoft.com/*",
-        "*://*.github.com/*"
+        "*://*.github.com/*",
+        "*://*.dynamics.com/*",
+        "*://*.crm.dynamics.com/*",
+        "*://*.crm*.dynamics.com/*"
       ],
       "js": ["content-script.js"],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "permissions": [
@@ -52,7 +55,10 @@
     "*://*.example.org/*",
     "*://*.google.com/*",
     "*://*.microsoft.com/*",
-    "*://*.github.com/*"
+    "*://*.github.com/*",
+    "*://*.dynamics.com/*",
+    "*://*.crm.dynamics.com/*",
+    "*://*.crm*.dynamics.com/*"
   ],
   "web_accessible_resources": [
     {
@@ -62,7 +68,10 @@
         "*://*.example.org/*",
         "*://*.google.com/*",
         "*://*.microsoft.com/*",
-        "*://*.github.com/*"
+        "*://*.github.com/*",
+        "*://*.dynamics.com/*",
+        "*://*.crm.dynamics.com/*",
+        "*://*.crm*.dynamics.com/*"
       ]
     }
   ],
