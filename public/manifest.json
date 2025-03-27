@@ -42,7 +42,8 @@
         "*://*.crm8.dynamics.com/*",
         "*://*.crm9.dynamics.com/*",
         "*://*.crm11.dynamics.com/*",
-        "*://*.crm12.dynamics.com/*"
+        "*://*.crm12.dynamics.com/*",
+        "*://org050aaf2f.crm8.dynamics.com/*"
       ],
       "js": ["content-script.js"],
       "run_at": "document_idle",
@@ -79,7 +80,8 @@
     "*://*.crm8.dynamics.com/*",
     "*://*.crm9.dynamics.com/*",
     "*://*.crm11.dynamics.com/*",
-    "*://*.crm12.dynamics.com/*"
+    "*://*.crm12.dynamics.com/*",
+    "*://org050aaf2f.crm8.dynamics.com/*"
   ],
   "web_accessible_resources": [
     {
@@ -102,7 +104,8 @@
         "*://*.crm8.dynamics.com/*",
         "*://*.crm9.dynamics.com/*",
         "*://*.crm11.dynamics.com/*",
-        "*://*.crm12.dynamics.com/*"
+        "*://*.crm12.dynamics.com/*",
+        "*://org050aaf2f.crm8.dynamics.com/*"
       ]
     }
   ],

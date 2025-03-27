@@ -28,6 +28,13 @@ const dynamicsCRM = {
     const isSpecificOrgDomain = hostname.includes('org050aaf2f.crm8.dynamics.com') || 
                                hostname.match(/org[a-zA-Z0-9]+\.crm[0-9]+\.dynamics\.com/);
     
+    // Direct check for the exact org050aaf2f URL pattern from your screenshot
+    if (hostname === 'org050aaf2f.crm8.dynamics.com') {
+      console.log('CRM Detection - Exact org050aaf2f.crm8.dynamics.com domain match!');
+      // Return true immediately for this exact domain
+      return true;
+    }
+    
     // Check for Xrm object in window or parent
     let hasXrm = false;
     try {
@@ -43,12 +50,21 @@ const dynamicsCRM = {
     // Check for common Dynamics CRM URL patterns
     const hasCrmUrlPattern = url.includes('/main.aspx') || 
                            url.includes('pagetype=entityrecord') ||
-                           url.includes('etn=') ||
+                           url.includes('etn=contact') ||
+                           url.includes('appid=633ed3b2-b807-f011-bae4-002248d4fe57') ||
                            url.match(/crm[0-9]+\.dynamics\.com/) !== null;
     
     // Special handling for org050aaf2f.crm8.dynamics.com/main.aspx... pattern
-    if (isSpecificOrgDomain && url.includes('/main.aspx')) {
-      console.log('CRM Detection - Special org domain with main.aspx detected!');
+    if (isSpecificOrgDomain && (url.includes('/main.aspx') || url.includes('pagetype=entityrecord'))) {
+      console.log('CRM Detection - Special org domain with main.aspx or entityrecord detected!');
+      return true;
+    }
+    
+    // Special handling for the specific URL pattern in your screenshot
+    if (url.includes('org050aaf2f.crm8.dynamics.com/main.aspx') && 
+        url.includes('appid=633ed3b2-b807-f011-bae4-002248d4fe57') && 
+        url.includes('pagetype=entityrecord')) {
+      console.log('CRM Detection - Exact URL pattern match from screenshot!');
       return true;
     }
     
