@@ -631,8 +631,15 @@ function detectBrowserFeatures() {
 }
 
 // Initialize content script
-async function initContentScript() {
+async function initContentScript(retryCount = 0) {
   try {
+    console.log(`Initializing content script for Dynamics CRM extension (attempt ${retryCount + 1})`);
+    logToExtension("INFO", `Content script initialized on ${window.location.href} (attempt ${retryCount + 1})`);
+    
+    // Add a staged initialization approach to handle CRM pages that load Xrm late
+    const MAX_RETRIES = 5;
+    const RETRY_DELAYS = [500, 1000, 2000, 3000, 5000]; // increasing delays
+    
     // Check for admin portals that might cause "Extension context invalidated" errors
     const url = window.location.href;
     const hostname = window.location.hostname;
@@ -1047,9 +1054,34 @@ async function initContentScript() {
       }
     });
     
+    // Add CRM-specific check and retry logic
+    if (dynamicsCRM && typeof dynamicsCRM.isDynamicsCRM === 'function' && !dynamicsCRM.isDynamicsCRM()) {
+      if (retryCount < MAX_RETRIES) {
+        console.log(`Xrm object not detected yet, will retry in ${RETRY_DELAYS[retryCount]}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+        logToExtension("INFO", `Dynamics CRM not detected yet, scheduling retry ${retryCount + 1}/${MAX_RETRIES}`);
+        
+        // Schedule a retry with increasing delay
+        setTimeout(() => {
+          initContentScript(retryCount + 1);
+        }, RETRY_DELAYS[retryCount]);
+        return;
+      } else {
+        console.log("Max retries reached, giving up on CRM detection");
+        logToExtension("WARNING", "Max retries reached, CRM detection unsuccessful");
+      }
+    }
   } catch (error) {
     console.error("Error initializing content script:", error);
     logToExtension("ERROR", `Content script initialization failed: ${error.message}`);
+    
+    // Even on error, we might want to retry a few times
+    if (retryCount < MAX_RETRIES) {
+      console.log(`Content script initialization failed, will retry in ${RETRY_DELAYS[retryCount]}ms (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+      
+      setTimeout(() => {
+        initContentScript(retryCount + 1);
+      }, RETRY_DELAYS[retryCount]);
+    }
   }
 }
 
@@ -1402,5 +1434,5 @@ window.testDynamicsCrmConnection = function() {
   return "Test running in background, check console for results...";
 };
 
-// Run the content script initialization
-initContentScript();
+// Run the content script initialization with retry capability
+initContentScript(0); // Start with retry count 0

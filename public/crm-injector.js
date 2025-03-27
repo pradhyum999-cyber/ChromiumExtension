@@ -247,33 +247,120 @@ window.CrmDataInjector = {
         return false;
       }
       
+      // Try to get the attribute by name
       var attribute = formContext.getAttribute(fieldName);
+      
+      // If not found, search all attributes - case insensitive
       if (!attribute) {
-        CrmDataInjector.log('ERROR', 'Field ' + fieldName + ' not found');
-        return false;
+        CrmDataInjector.log('WARNING', 'Field ' + fieldName + ' not found directly, searching case-insensitive');
+        // Get all attributes and search through them
+        try {
+          if (formContext.data && formContext.data.entity && formContext.data.entity.attributes) {
+            var attributes = formContext.data.entity.attributes;
+            // Handle collection objects
+            if (typeof attributes.forEach === 'function') {
+              attributes.forEach(function(attr) {
+                var attrName = attr.getName();
+                if (attrName && attrName.toLowerCase() === fieldName.toLowerCase()) {
+                  attribute = attr;
+                  CrmDataInjector.log('INFO', 'Found field ' + fieldName + ' as ' + attrName);
+                }
+              });
+            }
+          }
+        } catch (searchError) {
+          CrmDataInjector.log('ERROR', 'Error searching for field: ' + searchError.message);
+        }
+        
+        // Still not found - fail
+        if (!attribute) {
+          CrmDataInjector.log('ERROR', 'Field ' + fieldName + ' not found after searching');
+          return false;
+        }
       }
       
+      // Get the attribute type
       var attributeType = attribute.getAttributeType();
       CrmDataInjector.log('INFO', 'Setting field ' + fieldName + ' of type ' + attributeType + ' to: ' + JSON.stringify(value));
+      
+      // Save original value for validation
+      var originalValue = attribute.getValue();
       
       // Handle different attribute types
       switch (attributeType) {
         case 'datetime':
           if (typeof value === 'string') {
-            attribute.setValue(new Date(value));
-          } else {
+            // Handle date strings including shorthand formats
+            try {
+              // Try direct Date conversion first
+              var dateValue = new Date(value);
+              
+              // Check if we got a valid date
+              if (isNaN(dateValue.getTime())) {
+                // Try date formats: MM/DD/YYYY, DD/MM/YYYY, YYYY-MM-DD
+                var datePattern = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$|^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/;
+                var match = value.match(datePattern);
+                
+                if (match) {
+                  // Check format: which group matched determines format
+                  if (match[1]) {
+                    // MM/DD/YYYY or DD/MM/YYYY - use US format as default
+                    var month = parseInt(match[1]) - 1;
+                    var day = parseInt(match[2]);
+                    var year = parseInt(match[3]);
+                    dateValue = new Date(year, month, day);
+                  } else {
+                    // YYYY-MM-DD
+                    var year = parseInt(match[4]);
+                    var month = parseInt(match[5]) - 1;
+                    var day = parseInt(match[6]);
+                    dateValue = new Date(year, month, day);
+                  }
+                } else {
+                  // Try relative dates: "today", "tomorrow", "yesterday"
+                  var today = new Date();
+                  
+                  if (value.toLowerCase() === "today") {
+                    dateValue = today;
+                  } else if (value.toLowerCase() === "tomorrow") {
+                    dateValue = new Date(today);
+                    dateValue.setDate(today.getDate() + 1);
+                  } else if (value.toLowerCase() === "yesterday") {
+                    dateValue = new Date(today);
+                    dateValue.setDate(today.getDate() - 1);
+                  }
+                }
+              }
+              
+              // Set the date if valid
+              if (!isNaN(dateValue.getTime())) {
+                attribute.setValue(dateValue);
+              } else {
+                CrmDataInjector.log('WARNING', 'Invalid date format: ' + value);
+                return false;
+              }
+            } catch (dateError) {
+              CrmDataInjector.log('ERROR', 'Error parsing date: ' + dateError.message);
+              return false;
+            }
+          } else if (value instanceof Date) {
             attribute.setValue(value);
+          } else {
+            CrmDataInjector.log('WARNING', 'Invalid date value type: ' + typeof value);
+            return false;
           }
           break;
         
         case 'picklist':
         case 'optionset':
           if (typeof value === 'number') {
+            // Direct numeric value
             attribute.setValue(value);
           } else if (typeof value === 'string' && !isNaN(Number(value))) {
+            // Numeric string
             attribute.setValue(Number(value));
           } else if (typeof value === 'string') {
-            // Try to find the option by text
+            // Try to find the option by text (case insensitive)
             var options = attribute.getOptions();
             var found = false;
             
@@ -285,7 +372,20 @@ window.CrmDataInjector = {
             });
             
             if (!found) {
-              CrmDataInjector.log('WARNING', 'Could not find option matching ' + value + ' for field ' + fieldName);
+              // Try partial match as a fallback
+              for (var i = 0; i < options.length; i++) {
+                var option = options[i];
+                if (option.text && option.text.toLowerCase().indexOf(value.toLowerCase()) !== -1) {
+                  attribute.setValue(option.value);
+                  CrmDataInjector.log('INFO', 'Used partial text match for option: ' + option.text);
+                  found = true;
+                  break;
+                }
+              }
+            }
+            
+            if (!found) {
+              CrmDataInjector.log('WARNING', 'Could not find option matching "' + value + '" for field ' + fieldName);
               return false;
             }
           }
@@ -293,18 +393,259 @@ window.CrmDataInjector = {
         
         case 'boolean':
           if (typeof value === 'string') {
-            attribute.setValue(value.toLowerCase() === 'true' || value === '1');
+            var boolValue = value.toLowerCase();
+            if (boolValue === 'true' || boolValue === 'yes' || boolValue === '1' || boolValue === 'on') {
+              attribute.setValue(true);
+            } else if (boolValue === 'false' || boolValue === 'no' || boolValue === '0' || boolValue === 'off') {
+              attribute.setValue(false);
+            } else {
+              CrmDataInjector.log('WARNING', 'Unrecognized boolean value: ' + value);
+              return false;
+            }
           } else {
+            // Use native Boolean value or conversion
+            attribute.setValue(Boolean(value));
+          }
+          break;
+        
+        case 'money':
+          // Handle various money formats and currencies
+          var moneyValue = null;
+          
+          if (typeof value === 'number') {
+            moneyValue = value;
+          } else if (typeof value === 'string') {
+            // Remove currency symbols and commas, then parse
+            var cleanValue = value.replace(/[$€£¥,]/g, '').trim();
+            var parsedValue = parseFloat(cleanValue);
+            
+            if (!isNaN(parsedValue)) {
+              moneyValue = parsedValue;
+            } else {
+              CrmDataInjector.log('WARNING', 'Invalid money format: ' + value);
+              return false;
+            }
+          }
+          
+          if (moneyValue !== null) {
+            attribute.setValue(moneyValue);
+          }
+          break;
+        
+        case 'decimal':
+        case 'double':
+        case 'float':
+          // Handle numeric fields with potential formatting
+          var numValue = null;
+          
+          if (typeof value === 'number') {
+            numValue = value;
+          } else if (typeof value === 'string') {
+            // Remove commas and other separators
+            var cleanValue = value.replace(/[,]/g, '').trim();
+            var parsedValue = parseFloat(cleanValue);
+            
+            if (!isNaN(parsedValue)) {
+              numValue = parsedValue;
+            } else {
+              CrmDataInjector.log('WARNING', 'Invalid number format: ' + value);
+              return false;
+            }
+          }
+          
+          if (numValue !== null) {
+            attribute.setValue(numValue);
+          }
+          break;
+        
+        case 'integer':
+          // Handle integer fields
+          var intValue = null;
+          
+          if (typeof value === 'number') {
+            intValue = Math.round(value);
+          } else if (typeof value === 'string') {
+            // Remove commas and other separators
+            var cleanValue = value.replace(/[,]/g, '').trim();
+            var parsedValue = parseInt(cleanValue, 10);
+            
+            if (!isNaN(parsedValue)) {
+              intValue = parsedValue;
+            } else {
+              CrmDataInjector.log('WARNING', 'Invalid integer format: ' + value);
+              return false;
+            }
+          }
+          
+          if (intValue !== null) {
+            attribute.setValue(intValue);
+          }
+          break;
+        
+        case 'lookup':
+          // Handle lookup fields - support both ID and name-based lookup
+          if (value && typeof value === 'object' && value.id && value.entityType) {
+            // Object with ID and entity type
+            var lookupValue = [{
+              id: value.id,
+              name: value.name || '',
+              entityType: value.entityType
+            }];
+            attribute.setValue(lookupValue);
+          } else if (typeof value === 'string' && /^{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}}?$/i.test(value)) {
+            // Looks like a GUID - need to detect the entity type
+            try {
+              // Normalize GUID format
+              var guid = value.replace(/[{}]/g, '');
+              
+              // Try to guess entity type from attribute name
+              var entityType = '';
+              
+              // Common naming patterns
+              var attributeName = attribute.getName().toLowerCase();
+              if (attributeName.endsWith('id')) {
+                // Remove "id" suffix and see if it matches common entities
+                var baseEntity = attributeName.substr(0, attributeName.length - 2);
+                entityType = baseEntity;
+              } else if (attributeName.endsWith('customerid')) {
+                // Special case for customer fields (account or contact)
+                entityType = 'account'; // Default to account
+              } else if (attributeName.indexOf('_') > 0) {
+                // Pattern: entitytype_fieldname
+                entityType = attributeName.split('_')[0];
+              }
+              
+              // Create the lookup value
+              var lookupValue = [{
+                id: guid,
+                name: 'Record', // We don't know the name
+                entityType: entityType
+              }];
+              
+              CrmDataInjector.log('INFO', 'Setting lookup value with guessed entity type: ' + entityType);
+              attribute.setValue(lookupValue);
+            } catch (lookupError) {
+              CrmDataInjector.log('ERROR', 'Error setting lookup by GUID: ' + lookupError.message);
+              return false;
+            }
+          } else {
+            CrmDataInjector.log('WARNING', 'Invalid lookup value format, expected object or GUID');
+            return false;
+          }
+          break;
+        
+        case 'multiselectoptionset':
+          // Handle multi-select option sets
+          try {
+            // Support both arrays and comma-separated strings
+            var selectedValues = [];
+            
+            if (Array.isArray(value)) {
+              // Array of values - can be numbers or strings
+              selectedValues = value.map(function(item) {
+                return typeof item === 'string' && !isNaN(Number(item)) ? Number(item) : item;
+              });
+            } else if (typeof value === 'string') {
+              // Try to parse as comma-separated values
+              selectedValues = value.split(',').map(function(item) {
+                var trimmed = item.trim();
+                return !isNaN(Number(trimmed)) ? Number(trimmed) : trimmed;
+              });
+            }
+            
+            // If we have string values in the array, try to match by text
+            if (selectedValues.some(function(v) { return typeof v === 'string'; })) {
+              var options = attribute.getOptions();
+              var resolvedValues = [];
+              
+              // For each selected value, try to find matching option
+              selectedValues.forEach(function(val) {
+                if (typeof val === 'number') {
+                  resolvedValues.push(val);
+                } else if (typeof val === 'string') {
+                  // Find by text
+                  var found = false;
+                  
+                  for (var i = 0; i < options.length; i++) {
+                    var option = options[i];
+                    if (option.text && option.text.toLowerCase() === val.toLowerCase()) {
+                      resolvedValues.push(option.value);
+                      found = true;
+                      break;
+                    }
+                  }
+                  
+                  if (!found) {
+                    CrmDataInjector.log('WARNING', 'Option not found: ' + val);
+                  }
+                }
+              });
+              
+              if (resolvedValues.length > 0) {
+                attribute.setValue(resolvedValues);
+              } else {
+                CrmDataInjector.log('WARNING', 'No valid options found for multiselect');
+                return false;
+              }
+            } else {
+              // All numeric values
+              attribute.setValue(selectedValues);
+            }
+          } catch (multiSelectError) {
+            CrmDataInjector.log('ERROR', 'Error setting multiselect: ' + multiSelectError.message);
+            return false;
+          }
+          break;
+        
+        case 'memo':
+        case 'string':
+        case 'email':
+        case 'url':
+        case 'phone':
+          // String types - handle different input types
+          if (typeof value === 'string') {
             attribute.setValue(value);
+          } else if (value === null || value === undefined) {
+            attribute.setValue(null);
+          } else {
+            // Convert to string
+            attribute.setValue(String(value));
           }
           break;
         
         default:
+          // For any unhandled types, use direct assignment
           attribute.setValue(value);
       }
       
-      CrmDataInjector.log('INFO', 'Successfully set field ' + fieldName);
-      return true;
+      // Verify that the value was set correctly
+      try {
+        var newValue = attribute.getValue();
+        var success = newValue !== originalValue;
+        
+        // Special handling for some types
+        if (!success && attributeType === 'lookup' && newValue && originalValue) {
+          // For lookups, compare IDs
+          if (Array.isArray(newValue) && Array.isArray(originalValue)) {
+            if (newValue.length !== originalValue.length) {
+              success = true;
+            } else {
+              success = newValue.some(function(nv, i) {
+                return nv.id !== originalValue[i].id;
+              });
+            }
+          }
+        }
+        
+        if (!success) {
+          CrmDataInjector.log('WARNING', 'Field appears unchanged after setting: ' + fieldName);
+        }
+        
+        return true; // Still consider it a success even if value didn't change
+      } catch (verifyError) {
+        CrmDataInjector.log('WARNING', 'Error verifying field value: ' + verifyError.message);
+        return true; // Assume success if we can't verify
+      }
     } catch (e) {
       CrmDataInjector.log('ERROR', 'Error setting field ' + fieldName + ': ' + e.message);
       return false;

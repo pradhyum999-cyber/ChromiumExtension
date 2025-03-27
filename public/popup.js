@@ -58,66 +58,135 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Check if we're in a CRM page by querying active tabs
   function checkForCrmPage(callback) {
-    chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-      const activeTab = tabs[0];
-      if (!activeTab) {
-        updateStatus("No active tab found", true);
-        callback(false);
-        return;
-      }
+    try {
+      chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+        const activeTab = tabs[0];
+        if (!activeTab) {
+          updateStatus("No active tab found", true);
+          callback(false);
+          return;
+        }
 
-      // Show URL of the active tab
-      console.log("Checking tab:", activeTab.url);
-      
-      // Check if we can inject into this page
-      chrome.tabs.sendMessage(activeTab.id, { action: "checkCrm" }, function(response) {
-        if (chrome.runtime.lastError) {
-          const errorMessage = chrome.runtime.lastError.message;
-          console.log("Extension error:", errorMessage);
-          updateStatus("Cannot communicate with page", true, 
-            `Error: ${errorMessage}\nURL: ${activeTab.url}\nMake sure content scripts can run on this page.`);
-          callback(false);
-          return;
-        }
+        // Show URL of the active tab
+        console.log("Checking tab:", activeTab.url);
+        updateStatus("Detecting Dynamics CRM...", false);
         
-        if (!response) {
-          updateStatus("No response from content script", true, 
-            `URL: ${activeTab.url}\nPossible reasons:\n- Content script not injected\n- Page is not compatible`);
-          callback(false);
-          return;
-        }
+        // First check basic URL patterns for quick filtering
+        const url = activeTab.url;
+        const isDynamicsDomain = url.includes('dynamics.com') || 
+                                url.includes('.crm.') || 
+                                url.includes('crm2.dynamics.com') || 
+                                url.includes('crm4.dynamics.com') || 
+                                url.includes('crm8.dynamics.com');
         
-        console.log("CRM check response:", response);
-        
-        // Show detailed debugging information
-        const details = {
-          url: response.url || activeTab.url,
-          isDynamicsDomain: response.isDynamicsDomain,
-          hasXrm: response.hasXrm,
-          hasCrmUrlPattern: response.hasCrmUrlPattern,
-          isCrm: response.isCrm,
-          hasForm: response.hasForm
+        // Use retry mechanism for more reliable detection
+        const detectWithRetry = function(retryCount = 0, maxRetries = 3) {
+          console.log(`CRM detection attempt ${retryCount + 1}/${maxRetries}`);
+          
+          // Try TEST_CONNECTION first (more robust but newer)
+          chrome.tabs.sendMessage(activeTab.id, { action: "TEST_CONNECTION" }, function(testResponse) {
+            // If we got a response and it was successful, use that
+            if (!chrome.runtime.lastError && testResponse && testResponse.success) {
+              console.log("TEST_CONNECTION successful:", testResponse);
+              updateStatus("CRM detected via advanced method", false, 
+                `CRM detection successful using ${testResponse.method || 'direct'} method.`);
+              callback(true, activeTab.id);
+              return;
+            }
+            
+            // If TEST_CONNECTION failed, fallback to the standard checkCrm
+            chrome.tabs.sendMessage(activeTab.id, { action: "checkCrm" }, function(response) {
+              if (chrome.runtime.lastError) {
+                const errorMessage = chrome.runtime.lastError.message;
+                console.log("Extension error:", errorMessage);
+                
+                // If we have retries left, try again
+                if (retryCount < maxRetries - 1) {
+                  updateStatus(`Retrying CRM detection (${retryCount + 1}/${maxRetries})...`, false);
+                  setTimeout(function() {
+                    detectWithRetry(retryCount + 1, maxRetries);
+                  }, 1000 * (retryCount + 1)); // Increasing delay
+                  return;
+                }
+                
+                // Last resort - check URL patterns
+                if (isDynamicsDomain && (url.includes('/main.aspx') || url.includes('pagetype=entityrecord'))) {
+                  updateStatus("Likely a CRM page based on URL, but can't connect", true, 
+                    `Error: ${errorMessage}\nURL: ${activeTab.url}\nThe page appears to be CRM, but content script can't connect.`);
+                } else {
+                  updateStatus("Cannot communicate with page", true, 
+                    `Error: ${errorMessage}\nURL: ${activeTab.url}\nMake sure content scripts can run on this page.`);
+                }
+                
+                callback(false);
+                return;
+              }
+              
+              if (!response) {
+                // If we have retries left, try again
+                if (retryCount < maxRetries - 1) {
+                  setTimeout(function() {
+                    detectWithRetry(retryCount + 1, maxRetries);
+                  }, 1000 * (retryCount + 1)); // Increasing delay
+                  return;
+                }
+                
+                updateStatus("No response from content script", true, 
+                  `URL: ${activeTab.url}\nPossible reasons:\n- Content script not injected\n- Page is not compatible`);
+                callback(false);
+                return;
+              }
+              
+              console.log("CRM check response:", response);
+              
+              // Show detailed debugging information
+              const details = {
+                url: response.url || activeTab.url,
+                isDynamicsDomain: response.isDynamicsDomain,
+                hasXrm: response.hasXrm,
+                hasCrmUrlPattern: response.hasCrmUrlPattern,
+                isCrm: response.isCrm,
+                hasForm: response.hasForm
+              };
+              
+              if (!response.isCrm) {
+                // If we have retries left and there's a chance it's CRM, try again
+                if (retryCount < maxRetries - 1 && (isDynamicsDomain || response.isDynamicsDomain)) {
+                  updateStatus(`CRM not detected yet, retrying (${retryCount + 1}/${maxRetries})...`, false);
+                  setTimeout(function() {
+                    detectWithRetry(retryCount + 1, maxRetries);
+                  }, 1000 * (retryCount + 1)); // Increasing delay
+                  return;
+                }
+                
+                updateStatus("Not a Dynamics CRM page", true, 
+                  `The page doesn't appear to be a Dynamics CRM form. Debug info:\n${JSON.stringify(details, null, 2)}`);
+                callback(false);
+                return;
+              }
+              
+              if (!response.hasForm) {
+                updateStatus("No form detected in CRM", true, 
+                  `Detected a CRM page, but no form is available. Debug info:\n${JSON.stringify(details, null, 2)}`);
+                callback(false, activeTab.id);
+                return;
+              }
+              
+              updateStatus("Ready to fill form data in Dynamics CRM", false, 
+                `CRM detected and form is available. Debug info:\n${JSON.stringify(details, null, 2)}`);
+              callback(true, activeTab.id);
+            });
+          });
         };
         
-        if (!response.isCrm) {
-          updateStatus("Not a Dynamics CRM page", true, 
-            `The page doesn't appear to be a Dynamics CRM form. Debug info:\n${JSON.stringify(details, null, 2)}`);
-          callback(false);
-          return;
-        }
-        
-        if (!response.hasForm) {
-          updateStatus("No form detected in CRM", true, 
-            `Detected a CRM page, but no form is available. Debug info:\n${JSON.stringify(details, null, 2)}`);
-          callback(false, activeTab.id);
-          return;
-        }
-        
-        updateStatus("Ready to fill form data in Dynamics CRM", false, 
-          `CRM detected and form is available. Debug info:\n${JSON.stringify(details, null, 2)}`);
-        callback(true, activeTab.id);
+        // Start detection with retry mechanism
+        detectWithRetry();
       });
-    });
+    } catch (error) {
+      console.error("Error in checkForCrmPage:", error);
+      updateStatus("Error checking for CRM page: " + error.message, true);
+      if (typeof callback === 'function') callback(false);
+    }
   }
   
   // Update status message

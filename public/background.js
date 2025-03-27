@@ -675,6 +675,113 @@ try {
   console.log("Scripting permission not granted:", e);
 }
 
+// Enhanced Dynamics CRM detection in background script
+async function detectDynamicsCRM(tabId) {
+  return new Promise((resolve) => {
+    // Use multiple strategies to detect CRM
+    console.log("Starting enhanced CRM detection for tab:", tabId);
+    
+    try {
+      // First, check for specific URL patterns
+      chrome.tabs.get(tabId, (tab) => {
+        const url = tab.url;
+        const isDynamicsDomain = url.includes('dynamics.com') || 
+                                url.includes('crm.dynamics.com') || 
+                                url.includes('.crm.') || 
+                                url.includes('crm2.dynamics.com') || 
+                                url.includes('crm3.dynamics.com') || 
+                                url.includes('crm4.dynamics.com') || 
+                                url.includes('crm5.dynamics.com') || 
+                                url.includes('crm6.dynamics.com') || 
+                                url.includes('crm7.dynamics.com') || 
+                                url.includes('crm8.dynamics.com');
+        
+        const hasCrmUrlPattern = url.includes('/main.aspx') || 
+                              url.includes('pagetype=entityrecord') || 
+                              url.includes('etn=') || 
+                              url.includes('UCI=1');
+        
+        // If the URL is clearly not CRM, resolve quickly
+        if (!isDynamicsDomain && !hasCrmUrlPattern) {
+          console.log("URL doesn't match CRM patterns:", url);
+          resolve({
+            isCrm: false,
+            method: "url_mismatch",
+            url: url
+          });
+          return;
+        }
+        
+        // Try advanced detection through content script with retry mechanism
+        const MAX_RETRIES = 5;
+        const RETRY_DELAYS = [500, 1000, 2000, 3000, 5000]; // increasing delays
+        
+        function attemptDetection(retry = 0) {
+          console.log(`CRM detection attempt ${retry + 1}/${MAX_RETRIES}`);
+          
+          // Send detection message to content script
+          chrome.tabs.sendMessage(tabId, { action: "checkCrm" }, (response) => {
+            // Check for extension errors
+            if (chrome.runtime.lastError) {
+              console.log(`Content script error: ${chrome.runtime.lastError.message}`);
+              
+              // If we have retries left, try again with a delay
+              if (retry < MAX_RETRIES - 1) {
+                setTimeout(() => attemptDetection(retry + 1), RETRY_DELAYS[retry]);
+                return;
+              }
+              
+              // Max retries reached, make a best guess based on URL
+              resolve({
+                isCrm: isDynamicsDomain && hasCrmUrlPattern,
+                method: "url_pattern_fallback",
+                error: chrome.runtime.lastError.message,
+                url: url
+              });
+              return;
+            }
+            
+            // We have a response from content script
+            if (response && response.isCrm) {
+              // CRM detected!
+              console.log("CRM detected by content script:", response);
+              resolve({
+                isCrm: true,
+                hasForm: response.hasForm,
+                method: "content_script_detection",
+                url: response.url
+              });
+            } else if (retry < MAX_RETRIES - 1) {
+              // Not detected yet, but we have retries left
+              console.log("CRM not detected yet, retrying...");
+              setTimeout(() => attemptDetection(retry + 1), RETRY_DELAYS[retry]);
+            } else {
+              // Max retries reached
+              console.log("Max retries reached, CRM detection unsuccessful");
+              resolve({
+                isCrm: false,
+                method: "max_retries",
+                url: url,
+                contentScriptResponse: response
+              });
+            }
+          });
+        }
+        
+        // Start detection with retries
+        attemptDetection();
+      });
+    } catch (error) {
+      console.error("Error in CRM detection:", error);
+      resolve({
+        isCrm: false,
+        method: "error",
+        error: error.message
+      });
+    }
+  });
+}
+
 // Initialize when service worker starts
 initializeExtensionData();
 
