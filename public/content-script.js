@@ -197,6 +197,13 @@ async function initContentScript() {
           url: window.location.href,
           features: features
         });
+      } else if (message.action === "checkCrm") {
+        // Check if this is a CRM page
+        const isCrm = dynamicsCRM.isDynamicsCRM();
+        sendResponse({ 
+          isCrm: isCrm,
+          hasForm: isCrm && !!dynamicsCRM.getFormContext()
+        });
       } else if (message.action === "getPageMetrics") {
         // Get page metrics on demand
         const metrics = {
@@ -237,6 +244,37 @@ async function initContentScript() {
           success: success, 
           fieldName: message.fieldName,
           value: message.value
+        });
+      } else if (message.action === "fillForm") {
+        if (!dynamicsCRM.isDynamicsCRM()) {
+          sendResponse({ success: false, message: "Not a Dynamics CRM page" });
+          return true;
+        }
+
+        const templateData = message.data;
+        let fieldsToFill = { ...templateData };
+
+        // If contact only, just include contact-related fields
+        if (message.contactOnly) {
+          const contactFields = [
+            'telephone1', 'emailaddress1', 'websiteurl', 
+            'address1_line1', 'address1_city', 'address1_stateorprovince',
+            'address1_postalcode'
+          ];
+          
+          fieldsToFill = Object.keys(templateData)
+            .filter(key => contactFields.includes(key))
+            .reduce((obj, key) => {
+              obj[key] = templateData[key];
+              return obj;
+            }, {});
+        }
+        
+        const success = dynamicsCRM.fillFormFields(fieldsToFill);
+        sendResponse({ 
+          success: success,
+          filledCount: Object.keys(fieldsToFill).length,
+          message: success ? "Form data populated successfully" : "Failed to populate form data"
         });
       } else if (message.action === "fillDynamicsCRMForm") {
         if (!dynamicsCRM.isDynamicsCRM()) {

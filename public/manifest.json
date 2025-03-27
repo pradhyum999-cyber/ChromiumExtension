@@ -44,10 +44,11 @@
     }
   ],
   "permissions": [
-    "storage"
+    "storage",
+    "tabs",
+    "activeTab"
   ],
   "optional_permissions": [
-    "tabs",
     "cookies", 
     "webNavigation",
     "scripting",
