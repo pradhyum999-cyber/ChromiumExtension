@@ -1,13 +1,19 @@
 // Content script that runs in web pages
 // This script is injected into pages that match the patterns in manifest.json
 
-// Function to log events back to the extension
+// Function to log events back to the extension with error handling
 function logToExtension(level, message) {
-  chrome.runtime.sendMessage({
-    action: "addLog",
-    level: level,
-    message: message
-  });
+  try {
+    chrome.runtime.sendMessage({
+      action: "addLog",
+      level: level,
+      message: message
+    });
+  } catch (error) {
+    // Handle "Extension context invalidated" error
+    console.log(`Extension logging error: ${error.message}`);
+    // Don't rethrow - we want to continue execution even if messaging fails
+  }
 }
 
 // Dynamics CRM specific functions
@@ -489,6 +495,19 @@ function detectBrowserFeatures() {
 // Initialize content script
 async function initContentScript() {
   try {
+    // Check for admin portals that might cause "Extension context invalidated" errors
+    const url = window.location.href;
+    const hostname = window.location.hostname;
+    
+    // Skip PowerPlatform admin portal and other Microsoft admin sites
+    if (hostname.includes('admin.powerplatform.microsoft.com') || 
+        url.includes('/environments/environment/') ||
+        hostname.includes('admin.microsoft.com') ||
+        hostname.includes('portal.azure.com')) {
+      console.log("Content script disabled for admin portal:", url);
+      return;
+    }
+    
     const isEnabled = await isContentScriptEnabled();
     
     if (!isEnabled) {
@@ -497,7 +516,11 @@ async function initContentScript() {
     }
     
     // Log successful injection
-    logToExtension("INFO", `Content script injected into ${window.location.href}`);
+    try {
+      logToExtension("INFO", `Content script injected into ${window.location.href}`);
+    } catch (error) {
+      console.log("Error logging to extension, continuing anyway:", error.message);
+    }
     
     // Detect browser features
     const features = detectBrowserFeatures();
@@ -529,7 +552,8 @@ async function initContentScript() {
     
     // Listen for messages from the extension
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      console.log("Content script received message:", message.action);
+      try {
+        console.log("Content script received message:", message.action);
       
       if (message.action === "contentScriptStatus") {
         sendResponse({ 
@@ -802,7 +826,22 @@ async function initContentScript() {
           filledCount: Object.keys(message.values || {}).length
         });
       }
+      
       return true;
+    } catch (error) {
+        console.error("Error handling message in content script:", error);
+        // Return a graceful error response when possible
+        try {
+          sendResponse({ 
+            success: false, 
+            error: "Extension context error: " + error.message 
+          });
+        } catch (sendError) {
+          // Just log if we can't even send the response
+          console.error("Could not send response:", sendError);
+        }
+        return true;
+      }
     });
     
   } catch (error) {
@@ -821,28 +860,57 @@ function injectCrmScript() {
         return;
       }
       
+      // First check for admin portals that cause context invalidation
+      const url = window.location.href;
+      const hostname = window.location.hostname;
+      
+      // Skip PowerPlatform admin portal and other Microsoft admin sites
+      if (hostname.includes('admin.powerplatform.microsoft.com') || 
+          url.includes('/environments/environment/') ||
+          hostname.includes('admin.microsoft.com') ||
+          hostname.includes('portal.azure.com')) {
+        console.log("Injection skipped for admin portal:", url);
+        reject(new Error("Injection skipped for admin portal"));
+        return;
+      }
+      
       // First try the chrome.scripting API (requires scripting permission)
-      if (chrome.scripting) {
-        chrome.scripting.executeScript({
-          target: { tabId: -1, allFrames: true }, // -1 means current tab
-          func: injectScriptTag,
-          args: [chrome.runtime.getURL('crm-injector.js')]
-        }).then(() => {
-          window.injectedCrmScript = true;
-          logToExtension("INFO", "Script injected using chrome.scripting API");
-          resolve();
-        }).catch(error => {
-          logToExtension("WARNING", "Failed to inject script using chrome.scripting API: " + error.message);
-          // Fall back to script tag method
+      try {
+        if (chrome.scripting) {
+          chrome.scripting.executeScript({
+            target: { tabId: -1, allFrames: true }, // -1 means current tab
+            func: injectScriptTag,
+            args: [chrome.runtime.getURL('crm-injector.js')]
+          }).then(() => {
+            window.injectedCrmScript = true;
+            try {
+              logToExtension("INFO", "Script injected using chrome.scripting API");
+            } catch (logError) {
+              console.log("Logging error after injection:", logError.message);
+            }
+            resolve();
+          }).catch(error => {
+            console.log("Failed to inject script using chrome.scripting API:", error.message);
+            try {
+              logToExtension("WARNING", "Failed to inject script using chrome.scripting API: " + error.message);
+            } catch (logError) {
+              // Ignore logging errors
+            }
+            // Fall back to script tag method
+            injectScriptTag(chrome.runtime.getURL('crm-injector.js'));
+            window.injectedCrmScript = true;
+            resolve();
+          });
+        } else {
+          // Fallback method using a script tag
           injectScriptTag(chrome.runtime.getURL('crm-injector.js'));
           window.injectedCrmScript = true;
           resolve();
-        });
-      } else {
-        // Fallback method using a script tag
-        injectScriptTag(chrome.runtime.getURL('crm-injector.js'));
-        window.injectedCrmScript = true;
-        resolve();
+        }
+      } catch (runtimeError) {
+        console.error("Runtime error during injection:", runtimeError.message);
+        // If we get here, it's likely a context invalidation, so reject
+        reject(new Error("Extension context error: " + runtimeError.message));
       }
     } catch (e) {
       reject(e);
@@ -888,11 +956,16 @@ document.addEventListener('levelup', function(event) {
     if (event.detail && event.detail.type === 'Page') {
       console.log('Received levelup event:', event.detail);
       
-      // Forward to background script
-      chrome.runtime.sendMessage({
-        action: 'LEVELUP_EVENT',
-        data: event.detail
-      });
+      // Forward to background script with error handling
+      try {
+        chrome.runtime.sendMessage({
+          action: 'LEVELUP_EVENT',
+          data: event.detail
+        });
+      } catch (runtimeError) {
+        // Handle "Extension context invalidated" error or other runtime errors
+        console.error('Error sending levelup event to extension:', runtimeError.message);
+      }
     }
   } catch (e) {
     console.error('Error processing levelup event:', e);

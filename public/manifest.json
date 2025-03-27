@@ -45,6 +45,12 @@
         "*://*.crm12.dynamics.com/*",
         "*://org050aaf2f.crm8.dynamics.com/*"
       ],
+      "exclude_matches": [
+        "*://admin.powerplatform.microsoft.com/*",
+        "*://admin.microsoft.com/*",
+        "*://portal.azure.com/*",
+        "*://make.powerapps.com/*"
+      ],
       "js": ["content-script.js"],
       "run_at": "document_idle",
       "all_frames": true
