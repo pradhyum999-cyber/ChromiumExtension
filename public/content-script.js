@@ -21,6 +21,19 @@ const dynamicsCRM = {
     console.log('CRM Detection - URL:', url);
     console.log('CRM Detection - Hostname:', hostname);
     
+    // Detection method 1: Script sources (inspired by Level Up extension)
+    const isCRMBasedOnScripts = Array.from(document.scripts).some(
+      (script) =>
+        script.src.indexOf('/uclient/scripts') !== -1 ||
+        script.src.indexOf('/_static/_common/scripts/PageLoader.js') !== -1 ||
+        script.src.indexOf('/_static/_common/scripts/crminternalutility.js') !== -1
+    );
+    
+    if (isCRMBasedOnScripts) {
+      console.log('CRM Detection - Found CRM script sources');
+      return true;
+    }
+    
     // Check for the hostname containing dynamics.com
     const isDynamicsDomain = hostname.includes('dynamics.com');
     
@@ -516,12 +529,68 @@ async function initContentScript() {
     
     // Listen for messages from the extension
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      console.log("Content script received message:", message.action);
+      
       if (message.action === "contentScriptStatus") {
         sendResponse({ 
           status: "running", 
           url: window.location.href,
           features: features
         });
+      } else if (message.action === "injectCrmScript") {
+        // Handle script injection request
+        console.log("Content script received injectCrmScript request");
+        injectCrmScript()
+          .then(() => {
+            console.log("Script injection successful");
+            sendResponse({ success: true });
+          })
+          .catch((error) => {
+            console.error("Script injection failed:", error);
+            sendResponse({ success: false, error: error.message });
+          });
+          
+        return true; // Keep the message channel open for async response
+      } else if (message.action === "TEST_CONNECTION") {
+        // Handle test connection request
+        console.log("Content script received TEST_CONNECTION request");
+        
+        // First check if we were able to detect Xrm directly
+        const directXrm = typeof Xrm !== 'undefined' || 
+                        (window.parent && typeof window.parent.Xrm !== 'undefined');
+        
+        if (directXrm) {
+          console.log("Direct Xrm object found, responding success");
+          sendResponse({ success: true, method: "direct" });
+          return;
+        }
+        
+        // Try to communicate with our injected script
+        injectCrmScript()
+          .then(() => {
+            // Send a message to our injected script
+            window.postMessage({
+              type: 'CRM_EXTENSION_COMMAND',
+              command: 'TEST_CONNECTION'
+            }, '*');
+            
+            // Listen for response
+            listenForScriptResponse('TEST_CONNECTION', 3000)
+              .then((response) => {
+                console.log("Got TEST_CONNECTION response from injected script:", response);
+                sendResponse(response);
+              })
+              .catch((error) => {
+                console.error("TEST_CONNECTION response error:", error);
+                sendResponse({ success: false, error: error.message });
+              });
+          })
+          .catch((error) => {
+            console.error("Failed to inject script for TEST_CONNECTION:", error);
+            sendResponse({ success: false, error: error.message });
+          });
+          
+        return true; // Keep the message channel open for async response
       } else if (message.action === "checkCrm") {
         // Check if this is a CRM page
         const isDynamicsDomain = window.location.hostname.includes('dynamics.com');
@@ -604,11 +673,84 @@ async function initContentScript() {
           value: message.value
         });
       } else if (message.action === "fillForm") {
+        console.log("fillForm message received");
+        
         if (!dynamicsCRM.isDynamicsCRM()) {
-          sendResponse({ success: false, message: "Not a Dynamics CRM page" });
-          return true;
+          console.log("Not a Dynamics CRM page according to regular check");
+          
+          // Try using the injected script approach instead
+          injectCrmScript()
+            .then(() => {
+              const templateData = message.data;
+              let fieldsToFill = { ...templateData };
+              
+              // If contact only, just include contact-related fields
+              if (message.contactOnly) {
+                const contactFields = [
+                  // Personal information
+                  'firstname', 'lastname', 'fullname', 'jobtitle', 'parentcustomerid',
+                  'telephone1', 'telephone2', 'mobilephone', 'emailaddress1', 'emailaddress2',
+                  'websiteurl', 'fax',
+                  
+                  // Address information
+                  'address1_line1', 'address1_line2', 'address1_line3',
+                  'address1_city', 'address1_stateorprovince', 'address1_postalcode',
+                  'address1_country', 'address1_telephone1',
+                  
+                  // Secondary address
+                  'address2_line1', 'address2_line2', 'address2_city',
+                  'address2_stateorprovince', 'address2_postalcode', 'address2_country',
+                  
+                  // Additional info
+                  'birthdate', 'anniversary', 'spousesname', 'familystatuscode',
+                  'department', 'description', 'preferredcontactmethodcode'
+                ];
+                
+                fieldsToFill = Object.keys(templateData)
+                  .filter(key => contactFields.includes(key))
+                  .reduce((obj, key) => {
+                    obj[key] = templateData[key];
+                    return obj;
+                  }, {});
+              }
+              
+              // Send a message to our injected script
+              window.postMessage({
+                type: 'CRM_EXTENSION_COMMAND',
+                command: 'FILL_FORM_FIELDS',
+                data: fieldsToFill
+              }, '*');
+              
+              // Listen for response
+              listenForScriptResponse('FILL_FORM_FIELDS', 5000)
+                .then((response) => {
+                  console.log("Got FILL_FORM_FIELDS response from injected script:", response);
+                  sendResponse({ 
+                    success: response.success,
+                    filledCount: Object.keys(fieldsToFill).length,
+                    message: response.success ? "Form data populated successfully via injection" : "Failed to populate form data via injection"
+                  });
+                })
+                .catch((error) => {
+                  console.error("FILL_FORM_FIELDS response error:", error);
+                  sendResponse({ 
+                    success: false, 
+                    message: "Error in form filling via injection: " + error.message 
+                  });
+                });
+            })
+            .catch((error) => {
+              console.error("Failed to inject script for fillForm:", error);
+              sendResponse({ 
+                success: false, 
+                message: "Failed to inject script: " + error.message 
+              });
+            });
+            
+          return true; // Keep the message channel open for the async response
         }
 
+        // Traditional approach as fallback
         const templateData = message.data;
         let fieldsToFill = { ...templateData };
 
@@ -739,6 +881,23 @@ function listenForScriptResponse(command, timeoutMs) {
     window.addEventListener('message', responseHandler);
   });
 }
+
+// Listen for Level Up style custom events (used by the Level Up extension)
+document.addEventListener('levelup', function(event) {
+  try {
+    if (event.detail && event.detail.type === 'Page') {
+      console.log('Received levelup event:', event.detail);
+      
+      // Forward to background script
+      chrome.runtime.sendMessage({
+        action: 'LEVELUP_EVENT',
+        data: event.detail
+      });
+    }
+  } catch (e) {
+    console.error('Error processing levelup event:', e);
+  }
+});
 
 // Run the content script initialization
 initContentScript();

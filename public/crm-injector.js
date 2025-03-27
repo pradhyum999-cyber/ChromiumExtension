@@ -21,9 +21,21 @@ window.CrmDataInjector = {
     }
   },
 
-  // Get form context using all available methods
+  // Get form context using all available methods (enhanced with Level Up approach)
   getFormContext: function() {
     try {
+      // Detection method using script sources first (inspired by Level Up extension)
+      const isCRMBasedOnScripts = Array.from(document.scripts).some(
+        (script) =>
+          script.src.indexOf('/uclient/scripts') !== -1 ||
+          script.src.indexOf('/_static/_common/scripts/PageLoader.js') !== -1 ||
+          script.src.indexOf('/_static/_common/scripts/crminternalutility.js') !== -1
+      );
+      
+      if (isCRMBasedOnScripts) {
+        CrmDataInjector.log('INFO', 'CRM script sources found in page, higher confidence that this is CRM');
+      }
+      
       // First try the global Xrm
       if (typeof Xrm !== 'undefined') {
         CrmDataInjector.log('INFO', 'Global Xrm object found');
@@ -69,8 +81,56 @@ window.CrmDataInjector = {
         }
       }
       
-      // Search through all available frames
+      // Search through all available frames - starting with the ones that might have Xrm objects
       CrmDataInjector.log('INFO', 'Searching through frames for Xrm object');
+      
+      // Look for frames with names or IDs that are likely to contain CRM forms
+      const likelyFrames = [
+        'contentIFrame0',
+        'contentIFrame1',
+        'contentIFrame2',
+        'contentIFrame3',
+        'areaContentIFrame',
+        'gridIFrame',
+        'inlineGridIFrame',
+        'NavBarGlobalQuickCreate'
+      ];
+      
+      // Try likely frames by name first
+      for (let frameName of likelyFrames) {
+        try {
+          const frame = window.parent.frames[frameName];
+          if (frame && frame.Xrm) {
+            CrmDataInjector.log('INFO', `Found Xrm in named frame: ${frameName}`);
+            if (frame.Xrm.Page && frame.Xrm.Page.data && frame.Xrm.Page.data.entity) {
+              CrmDataInjector.log('INFO', `Using form context from named frame: ${frameName}`);
+              return frame.Xrm.Page;
+            }
+          }
+        } catch (frameError) {
+          // Ignore cross-origin errors
+        }
+      }
+      
+      // Try document.getElementById
+      for (let frameId of likelyFrames) {
+        try {
+          const frameElement = document.getElementById(frameId);
+          if (frameElement && frameElement.contentWindow && frameElement.contentWindow.Xrm) {
+            CrmDataInjector.log('INFO', `Found Xrm in frame by ID: ${frameId}`);
+            if (frameElement.contentWindow.Xrm.Page && 
+                frameElement.contentWindow.Xrm.Page.data && 
+                frameElement.contentWindow.Xrm.Page.data.entity) {
+              CrmDataInjector.log('INFO', `Using form context from frame ID: ${frameId}`);
+              return frameElement.contentWindow.Xrm.Page;
+            }
+          }
+        } catch (idError) {
+          // Ignore cross-origin errors
+        }
+      }
+      
+      // Use the recursive approach as a fallback
       var formContext = CrmDataInjector.findXrmInFrames(window);
       if (formContext) {
         return formContext;
@@ -288,11 +348,41 @@ window.CrmDataInjector = {
             
           case 'TEST_CONNECTION':
             var formContext = CrmDataInjector.getFormContext();
+            
+            // Get more detailed information to help debug
+            var pageInfo = {};
+            try {
+              // Try to gather useful diagnostic info
+              pageInfo.url = window.location.href;
+              pageInfo.title = document.title;
+              pageInfo.scripts = Array.from(document.scripts).map(s => s.src).filter(s => s.includes('/uclient/') || s.includes('/_static/'));
+              
+              if (formContext) {
+                pageInfo.entityName = formContext.data.entity.getEntityName();
+                pageInfo.formType = formContext.ui ? formContext.ui.getFormType() : 'Unknown';
+                pageInfo.recordId = formContext.data.entity.getId ? formContext.data.entity.getId() : null;
+                
+                // Try to get control count
+                if (formContext.ui && formContext.ui.controls) {
+                  try {
+                    var controlCount = 0;
+                    formContext.ui.controls.forEach(function() { controlCount++; });
+                    pageInfo.controlCount = controlCount;
+                  } catch (controlError) {
+                    pageInfo.controlCount = 'Error: ' + controlError.message;
+                  }
+                }
+              }
+            } catch (infoError) {
+              pageInfo.error = infoError.message;
+            }
+            
             window.postMessage({
               type: 'CRM_EXTENSION_RESPONSE',
               command: 'TEST_CONNECTION',
               success: !!formContext,
-              entityName: formContext ? formContext.data.entity.getEntityName() : null
+              entityName: formContext ? formContext.data.entity.getEntityName() : null,
+              pageInfo: pageInfo
             }, '*');
             break;
         }

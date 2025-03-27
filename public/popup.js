@@ -208,29 +208,42 @@ document.addEventListener('DOMContentLoaded', function() {
       
       const activeTab = tabs[0];
       
-      // First try injecting with the background script
-      chrome.runtime.sendMessage({ 
-        action: "injectCrmScript"
-      }, function(response) {
+      // First try injecting the Level Up approach with Sdk.Soap
+      chrome.scripting.executeScript({
+        target: { tabId: activeTab.id, allFrames: true },
+        files: ['scripts/Sdk.Soap.min.js', 'scripts/levelup.extension.js']
+      }, function(levelUpResult) {
         if (chrome.runtime.lastError) {
-          debugInfoElement.textContent += "\nBackground script error: " + chrome.runtime.lastError.message;
+          debugInfoElement.textContent += "\nLevel Up injection error: " + chrome.runtime.lastError.message;
           
-          // Try direct method as fallback
-          chrome.tabs.sendMessage(activeTab.id, { 
-            action: "injectCrmScript"
-          }, function(contentResponse) {
+          // Try the standard injector as second approach
+          chrome.scripting.executeScript({
+            target: { tabId: activeTab.id, allFrames: true },
+            files: ['crm-injector.js']
+          }, function(injectorResult) {
             if (chrome.runtime.lastError) {
-              debugInfoElement.textContent += "\nContent script error: " + chrome.runtime.lastError.message;
+              debugInfoElement.textContent += "\nStandard injector error: " + chrome.runtime.lastError.message;
+              
+              // Next try injecting with the background script
+              chrome.runtime.sendMessage({ 
+                action: "injectCrmScript"
+              }, function(response) {
+                if (chrome.runtime.lastError) {
+                  debugInfoElement.textContent += "\nBackground script error: " + chrome.runtime.lastError.message;
+                  return;
+                }
+                
+                debugInfoElement.textContent += "\nBackground script response: " + JSON.stringify(response);
+              });
               return;
             }
             
-            debugInfoElement.textContent += "\nContent script response: " + JSON.stringify(contentResponse);
+            debugInfoElement.textContent += "\nStandard injector success!";
           });
-          
           return;
         }
         
-        debugInfoElement.textContent += "\nBackground script response: " + JSON.stringify(response);
+        debugInfoElement.textContent += "\nLevel Up injection successful!";
         
         // Now test the connection to verify it worked
         setTimeout(() => {

@@ -151,6 +151,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("Message received:", message.action, message);
   }
   
+  // Handle Level Up style messages
+  if (message.type === "Page") {
+    console.log("Received Level Up style message:", message);
+    
+    // Handle extension state
+    if (message.category === "Extension") {
+      if (message.content === "On") {
+        logEvent("INFO", "Extension activated on CRM page");
+      } else if (message.content === "Off") {
+        logEvent("INFO", "Extension deactivated (not a CRM page)");
+      }
+    }
+    
+    // Handle other Level Up message types
+    if (message.category) {
+      logEvent("INFO", `Received ${message.category} message from page`);
+    }
+    
+    return true; // Keep the message channel open for async response
+  }
+  
   switch (message.action) {
     case "getFeatures":
       chrome.storage.local.get(['features'], (result) => {

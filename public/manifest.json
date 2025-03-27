@@ -85,7 +85,12 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["icons/*.png", "crm-injector.js"],
+      "resources": [
+        "icons/*.png", 
+        "crm-injector.js", 
+        "scripts/levelup.extension.js",
+        "scripts/Sdk.Soap.min.js"
+      ],
       "matches": [
         "*://*.example.com/*", 
         "*://*.example.org/*",
