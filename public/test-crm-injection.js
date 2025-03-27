@@ -1,25 +1,10 @@
-// Test script for Dynamics CRM form injection
-console.log('CRM Form Injection Test Script Loaded');
+// Dynamics CRM Form Auto-Fill Extension
+console.log('Dynamics CRM Form Auto-Fill Extension Loaded');
 
-// Sample data to inject into the CRM form
-const sampleData = {
-  singleField: {
-    fieldName: 'accountName',
-    value: 'Northwind Traders'
-  },
-  contactInfo: {
-    phoneNumber: '(555) 987-6543',
-    email: 'sales@northwindtraders.com',
-    website: 'https://www.northwindtraders.com'
-  },
-  addressInfo: {
-    street: '456 Commerce Avenue',
-    city: 'Chicago',
-    state: 'IL',
-    postalCode: '60601',
-    country: 'United States'
-  },
-  completeAccount: {
+// Sample data templates to inject into CRM forms
+const dataTemplates = {
+  // Business account template
+  businessAccount: {
     accountName: 'Northwind Traders',
     accountNumber: 'NWTR-2023-789',
     industry: 'retail',
@@ -32,235 +17,257 @@ const sampleData = {
     state: 'IL',
     postalCode: '60601',
     country: 'United States',
-    description: 'Northwind Traders is a global import/export company specializing in specialty food products from around the world. They maintain distribution centers in major cities across North America and Europe.'
+    description: 'Northwind Traders is a global import/export company specializing in specialty food products from around the world.'
+  },
+  
+  // Healthcare organization template
+  healthcareOrg: {
+    accountName: 'Mercy Medical Center',
+    accountNumber: 'MMC-2023-456',
+    industry: 'healthcare',
+    annualRevenue: '25000000',
+    phoneNumber: '(555) 456-7890',
+    email: 'info@mercymedical.org',
+    website: 'https://www.mercymedical.org',
+    street: '789 Health Avenue',
+    city: 'Boston',
+    state: 'MA',
+    postalCode: '02108',
+    country: 'United States',
+    description: 'Mercy Medical Center is a nonprofit healthcare organization providing comprehensive medical services to the greater Boston area.'
   }
 };
 
-// Add extension-specific test buttons to the page
-function addExtensionTests() {
-  // Create extension test panel
+// Add extension UI to the CRM form
+function createExtensionInterface() {
+  // Create extension panel
   const extensionPanel = document.createElement('div');
   extensionPanel.className = 'extension-panel';
-  extensionPanel.style.marginTop = '30px';
-  extensionPanel.style.backgroundColor = '#e6f7ff';
-  extensionPanel.style.borderColor = '#91d5ff';
+  extensionPanel.style.margin = '30px 0';
+  extensionPanel.style.padding = '20px';
+  extensionPanel.style.backgroundColor = '#f9f9ff';
+  extensionPanel.style.borderRadius = '8px';
+  extensionPanel.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.1)';
+  extensionPanel.style.border = '1px solid #e1e4ff';
   
-  // Create title
-  const title = document.createElement('div');
-  title.className = 'extension-title';
-  title.textContent = '🧪 Extension API Test Panel';
-  extensionPanel.appendChild(title);
+  // Create header
+  const header = document.createElement('div');
+  header.style.display = 'flex';
+  header.style.alignItems = 'center';
+  header.style.marginBottom = '15px';
+  
+  const icon = document.createElement('div');
+  icon.innerHTML = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" 
+    stroke="#4f46e5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+      <polyline points="9 22 9 12 15 12 15 22"></polyline>
+    </svg>
+  `;
+  icon.style.marginRight = '10px';
+  
+  const title = document.createElement('h2');
+  title.textContent = 'CRM Auto-Fill Tool';
+  title.style.margin = '0';
+  title.style.color = '#4338ca';
+  title.style.fontSize = '18px';
+  
+  header.appendChild(icon);
+  header.appendChild(title);
+  extensionPanel.appendChild(header);
   
   // Create description
   const description = document.createElement('p');
-  description.textContent = 'These buttons test the browser extension API for CRM form injection. They demonstrate how the extension API can be used by developers.';
+  description.textContent = 'Select a data template and click the button to automatically fill in the form fields.';
+  description.style.color = '#6b7280';
+  description.style.marginBottom = '20px';
   extensionPanel.appendChild(description);
   
-  // Create buttons container
-  const controls = document.createElement('div');
-  controls.className = 'extension-controls';
-  extensionPanel.appendChild(controls);
+  // Create template selector
+  const selectorContainer = document.createElement('div');
+  selectorContainer.style.marginBottom = '20px';
   
-  // Test button 1: Check if page is CRM
-  const btnCheckCRM = document.createElement('button');
-  btnCheckCRM.className = 'extension-button';
-  btnCheckCRM.style.backgroundColor = '#1890ff';
-  btnCheckCRM.textContent = 'Check CRM Status';
-  btnCheckCRM.addEventListener('click', testCheckCRMPage);
-  controls.appendChild(btnCheckCRM);
+  const selectorLabel = document.createElement('label');
+  selectorLabel.textContent = 'Select Template:';
+  selectorLabel.style.display = 'block';
+  selectorLabel.style.marginBottom = '8px';
+  selectorLabel.style.fontWeight = 'bold';
+  selectorLabel.style.color = '#4b5563';
   
-  // Test button 2: Get form fields
-  const btnGetFields = document.createElement('button');
-  btnGetFields.className = 'extension-button';
-  btnGetFields.style.backgroundColor = '#52c41a';
-  btnGetFields.textContent = 'Get Form Fields';
-  btnGetFields.addEventListener('click', testGetFormFields);
-  controls.appendChild(btnGetFields);
+  const selector = document.createElement('select');
+  selector.id = 'template-selector';
+  selector.style.width = '100%';
+  selector.style.padding = '10px';
+  selector.style.borderRadius = '4px';
+  selector.style.border = '1px solid #d1d5db';
+  selector.style.backgroundColor = 'white';
   
-  // Test button 3: Set single field
-  const btnSetField = document.createElement('button');
-  btnSetField.className = 'extension-button';
-  btnSetField.style.backgroundColor = '#fa8c16';
-  btnSetField.textContent = 'Set Company Name';
-  btnSetField.addEventListener('click', testSetSingleField);
-  controls.appendChild(btnSetField);
+  const option1 = document.createElement('option');
+  option1.value = 'businessAccount';
+  option1.textContent = 'Business Account';
   
-  // Test button 4: Fill contact info
-  const btnFillContact = document.createElement('button');
-  btnFillContact.className = 'extension-button';
-  btnFillContact.style.backgroundColor = '#eb2f96';
-  btnFillContact.textContent = 'Fill Contact Info';
-  btnFillContact.addEventListener('click', testFillContactInfo);
-  controls.appendChild(btnFillContact);
+  const option2 = document.createElement('option');
+  option2.value = 'healthcareOrg';
+  option2.textContent = 'Healthcare Organization';
   
-  // Test button 5: Fill all fields
+  selector.appendChild(option1);
+  selector.appendChild(option2);
+  
+  selectorContainer.appendChild(selectorLabel);
+  selectorContainer.appendChild(selector);
+  extensionPanel.appendChild(selectorContainer);
+  
+  // Create action buttons
+  const actionsContainer = document.createElement('div');
+  actionsContainer.style.display = 'flex';
+  actionsContainer.style.gap = '10px';
+  
+  // Fill All Fields button
   const btnFillAll = document.createElement('button');
-  btnFillAll.className = 'extension-button';
-  btnFillAll.style.backgroundColor = '#722ed1';
-  btnFillAll.textContent = 'Fill Complete Account';
-  btnFillAll.addEventListener('click', testFillAllFields);
-  controls.appendChild(btnFillAll);
+  btnFillAll.textContent = 'Fill All Fields';
+  btnFillAll.style.flex = '1';
+  btnFillAll.style.padding = '12px';
+  btnFillAll.style.backgroundColor = '#4f46e5';
+  btnFillAll.style.color = 'white';
+  btnFillAll.style.border = 'none';
+  btnFillAll.style.borderRadius = '4px';
+  btnFillAll.style.cursor = 'pointer';
+  btnFillAll.style.fontWeight = 'bold';
+  btnFillAll.addEventListener('click', fillAllFields);
+  
+  // Fill Contact Info button
+  const btnFillContact = document.createElement('button');
+  btnFillContact.textContent = 'Fill Contact Info Only';
+  btnFillContact.style.flex = '1';
+  btnFillContact.style.padding = '12px';
+  btnFillContact.style.backgroundColor = '#f9fafb';
+  btnFillContact.style.color = '#4b5563';
+  btnFillContact.style.border = '1px solid #d1d5db';
+  btnFillContact.style.borderRadius = '4px';
+  btnFillContact.style.cursor = 'pointer';
+  btnFillContact.addEventListener('click', fillContactInfo);
+  
+  actionsContainer.appendChild(btnFillAll);
+  actionsContainer.appendChild(btnFillContact);
+  extensionPanel.appendChild(actionsContainer);
+  
+  // Status message area
+  const statusArea = document.createElement('div');
+  statusArea.id = 'status-message';
+  statusArea.style.marginTop = '20px';
+  statusArea.style.padding = '10px';
+  statusArea.style.borderRadius = '4px';
+  statusArea.style.display = 'none';
+  extensionPanel.appendChild(statusArea);
   
   // Add the panel to the page
   document.querySelector('.crm-form').appendChild(extensionPanel);
-  
-  // Create status panel for displaying results
-  const statusPanel = document.createElement('div');
-  statusPanel.id = 'extension-status';
-  statusPanel.style.marginTop = '20px';
-  statusPanel.style.padding = '15px';
-  statusPanel.style.backgroundColor = '#f5f5f5';
-  statusPanel.style.borderRadius = '4px';
-  statusPanel.style.display = 'none';
-  document.querySelector('.crm-form').appendChild(statusPanel);
 }
 
 // Show status message
 function showStatus(message, isSuccess = true) {
-  const statusPanel = document.getElementById('extension-status');
-  statusPanel.textContent = message;
-  statusPanel.style.display = 'block';
-  statusPanel.style.backgroundColor = isSuccess ? '#f6ffed' : '#fff2f0';
-  statusPanel.style.border = `1px solid ${isSuccess ? '#b7eb8f' : '#ffccc7'}`;
-  statusPanel.style.color = isSuccess ? '#52c41a' : '#f5222d';
+  const statusArea = document.getElementById('status-message');
+  if (!statusArea) return;
+  
+  statusArea.textContent = message;
+  statusArea.style.display = 'block';
+  statusArea.style.backgroundColor = isSuccess ? '#f0fdf4' : '#fef2f2';
+  statusArea.style.color = isSuccess ? '#166534' : '#b91c1c';
+  statusArea.style.border = `1px solid ${isSuccess ? '#bbf7d0' : '#fecaca'}`;
   
   // Auto hide after 5 seconds
   setTimeout(() => {
-    statusPanel.style.display = 'none';
+    statusArea.style.display = 'none';
   }, 5000);
 }
 
-// Test functions
-async function testCheckCRMPage() {
+// Get the currently selected template data
+function getSelectedTemplateData() {
+  const selector = document.getElementById('template-selector');
+  if (!selector) return dataTemplates.businessAccount;
+  
+  const templateKey = selector.value;
+  return dataTemplates[templateKey] || dataTemplates.businessAccount;
+}
+
+// Fill all fields in the form
+function fillAllFields() {
   try {
-    // Use the browser extension API to check if this is a CRM page
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({ action: "checkDynamicsCRM" }, function(response) {
-        if (response && response.success) {
-          showStatus(`CRM Status: isDynamicsCRM=${response.isDynamicsCRM}, hasForm=${response.hasForm}`);
-        } else {
-          showStatus(`Error checking CRM status: ${response?.error || 'Unknown error'}`, false);
-        }
-      });
-    } else {
-      // Simulate response in development environment
-      showStatus(`CRM Status: isDynamicsCRM=true, hasForm=true (simulated)`);
-    }
+    const data = getSelectedTemplateData();
+    
+    // In a real extension, this would use chrome.runtime.sendMessage
+    // Simulating the behavior for our test environment
+    const fieldCount = fillFormWithData(data);
+    
+    showStatus(`Successfully filled ${fieldCount} fields with ${getSelectedTemplateName()} data`);
   } catch (error) {
-    showStatus(`Error: ${error.message}`, false);
+    showStatus(`Error filling fields: ${error.message}`, false);
   }
 }
 
-async function testGetFormFields() {
+// Fill only contact information fields
+function fillContactInfo() {
   try {
-    // Use the browser extension API to get form fields
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({ action: "getDynamicsCRMFields" }, function(response) {
-        if (response && response.success) {
-          const fieldCount = response.fields?.length || 0;
-          showStatus(`Found ${fieldCount} form fields on the page`);
-          console.log('Form fields:', response.fields);
-        } else {
-          showStatus(`Error getting form fields: ${response?.error || 'Unknown error'}`, false);
-        }
-      });
-    } else {
-      // Simulate response in development environment
-      const fields = document.querySelectorAll('input, select, textarea');
-      showStatus(`Found ${fields.length} form fields on the page (simulated)`);
-    }
+    const data = getSelectedTemplateData();
+    const contactData = {
+      phoneNumber: data.phoneNumber,
+      email: data.email,
+      website: data.website
+    };
+    
+    // In a real extension, this would use chrome.runtime.sendMessage
+    // Simulating the behavior for our test environment
+    const fieldCount = fillFormWithData(contactData);
+    
+    showStatus(`Successfully filled ${fieldCount} contact fields with ${getSelectedTemplateName()} data`);
   } catch (error) {
-    showStatus(`Error: ${error.message}`, false);
+    showStatus(`Error filling contact fields: ${error.message}`, false);
   }
 }
 
-async function testSetSingleField() {
-  try {
-    // Use the browser extension API to set a single field
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({ 
-        action: "setDynamicsCRMField",
-        fieldName: sampleData.singleField.fieldName,
-        value: sampleData.singleField.value
-      }, function(response) {
-        if (response && response.success) {
-          showStatus(`Successfully set field '${sampleData.singleField.fieldName}' to '${sampleData.singleField.value}'`);
-        } else {
-          showStatus(`Error setting field: ${response?.error || 'Unknown error'}`, false);
+// Helper function to fill form with provided data
+function fillFormWithData(data) {
+  let filledCount = 0;
+  
+  Object.entries(data).forEach(([field, value]) => {
+    const element = document.getElementById(field);
+    if (element) {
+      // Using Xrm API if available, otherwise direct DOM manipulation
+      if (window.Xrm && window.Xrm.Page && window.Xrm.Page.getAttribute) {
+        const attr = window.Xrm.Page.getAttribute(field);
+        if (attr) {
+          attr.setValue(value);
+          filledCount++;
         }
-      });
-    } else {
-      // Simulate response in development environment
-      document.getElementById(sampleData.singleField.fieldName).value = sampleData.singleField.value;
-      showStatus(`Successfully set field '${sampleData.singleField.fieldName}' to '${sampleData.singleField.value}' (simulated)`);
+      } else {
+        element.value = value;
+        filledCount++;
+        
+        // Trigger change event for form validation
+        const event = new Event('change');
+        element.dispatchEvent(event);
+      }
     }
-  } catch (error) {
-    showStatus(`Error: ${error.message}`, false);
-  }
+  });
+  
+  return filledCount;
 }
 
-async function testFillContactInfo() {
-  try {
-    // Use the browser extension API to fill contact info fields
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({ 
-        action: "fillDynamicsCRMForm",
-        values: sampleData.contactInfo
-      }, function(response) {
-        if (response && response.success) {
-          showStatus(`Successfully filled ${Object.keys(sampleData.contactInfo).length} contact fields`);
-        } else {
-          showStatus(`Error filling contact fields: ${response?.error || 'Unknown error'}`, false);
-        }
-      });
-    } else {
-      // Simulate response in development environment
-      Object.entries(sampleData.contactInfo).forEach(([field, value]) => {
-        const element = document.getElementById(field);
-        if (element) element.value = value;
-      });
-      showStatus(`Successfully filled ${Object.keys(sampleData.contactInfo).length} contact fields (simulated)`);
-    }
-  } catch (error) {
-    showStatus(`Error: ${error.message}`, false);
-  }
+// Get friendly name of selected template
+function getSelectedTemplateName() {
+  const selector = document.getElementById('template-selector');
+  if (!selector) return "Business Account";
+  
+  return selector.options[selector.selectedIndex].text;
 }
 
-async function testFillAllFields() {
-  try {
-    // Use the browser extension API to fill all fields
-    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({ 
-        action: "fillDynamicsCRMForm",
-        values: sampleData.completeAccount
-      }, function(response) {
-        if (response && response.success) {
-          showStatus(`Successfully filled ${Object.keys(sampleData.completeAccount).length} account fields`);
-        } else {
-          showStatus(`Error filling account fields: ${response?.error || 'Unknown error'}`, false);
-        }
-      });
-    } else {
-      // Simulate response in development environment
-      Object.entries(sampleData.completeAccount).forEach(([field, value]) => {
-        const element = document.getElementById(field);
-        if (element) element.value = value;
-      });
-      showStatus(`Successfully filled ${Object.keys(sampleData.completeAccount).length} account fields (simulated)`);
-    }
-  } catch (error) {
-    showStatus(`Error: ${error.message}`, false);
-  }
-}
-
-// Wait for DOM to be fully loaded
+// Initialize the extension interface
 document.addEventListener('DOMContentLoaded', function() {
-  // Add extension test buttons to the page
-  addExtensionTests();
-  console.log('CRM Form Injection Test Interface Ready');
+  createExtensionInterface();
+  console.log('CRM Auto-Fill Interface Ready');
 });
 
-// Add the extension tests immediately if document already loaded
+// Initialize immediately if document already loaded
 if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  setTimeout(addExtensionTests, 0);
+  setTimeout(createExtensionInterface, 0);
 }
